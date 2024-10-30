@@ -47,6 +47,8 @@ jobs:
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           platforms: linux/amd64 #,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build documentation
         run: docker run -v $(pwd):/home/wildfenics/shared -w /home/wildfenics/shared ${{ steps.metadata.outputs.tags }}
