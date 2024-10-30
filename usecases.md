@@ -1,4 +1,4 @@
-# Use-cases
+# Use cases
 
 ```{toctree}
 :maxdepth: 2

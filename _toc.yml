@@ -9,7 +9,7 @@ parts:
     chapters:
       - file: installation
 
-  - caption: "Use-cases"
+  - caption: "Use cases"
     chapters:
       - file: usecases
         sections:
