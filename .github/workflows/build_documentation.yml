@@ -1,0 +1,60 @@
+name: Build documentation
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  # Directory that will be published on github pages
+  PUBLISH_DIR: ./_build/html
+  DEB_PYTHON_INSTALL_LAYOUT: deb_system
+  PYVISTA_TRAME_SERVER_PROXY_PREFIX: "/proxy/"
+  PYVISTA_TRAME_SERVER_PROXY_ENABLED: "True"
+  PYVISTA_OFF_SCREEN: false
+  PYVISTA_JUPYTER_BACKEND: "html"
+  LIBGL_ALWAYS_SOFTWARE: 1
+  DISPLAY: ":99.0"
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: linux/amd64 #,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Extract metadata for all images
+        id: metadata
+        uses: docker/metadata-action@v4
+        with:
+          images: fenics-wild-docs
+
+      - name: Build upload-predictions image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: Dockerfile
+          pull: false
+          load: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          platforms: linux/amd64 #,linux/arm64
+
+      - name: Build documentation
+        run: docker run -v $(pwd):/home/wildfenics/shared -w /home/wildfenics/shared ${{ steps.metadata.outputs.tags }}
+
+      - name: Upload documentation as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: documentation
+          path: ${{ env.PUBLISH_DIR }}
+          if-no-files-found: error

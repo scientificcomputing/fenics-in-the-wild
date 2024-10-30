@@ -1,0 +1,17 @@
+format: jb-book
+root: index
+
+defaults:
+  titlesonly: true
+
+parts:
+  - caption: "FEniCS in the Wild"
+    chapters:
+      - file: installation
+
+  - caption: "Use-cases"
+    chapters:
+      - file: usecases
+        sections:
+          - file: ucs/uc1
+          - file: ucs/uc2
