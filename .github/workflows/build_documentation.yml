@@ -1,0 +1,51 @@
+name: Build documentation
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  # Directory that will be published on github pages
+  PUBLISH_DIR: ./_build/html
+  DEB_PYTHON_INSTALL_LAYOUT: deb_system
+  PYVISTA_TRAME_SERVER_PROXY_PREFIX: "/proxy/"
+  PYVISTA_TRAME_SERVER_PROXY_ENABLED: "True"
+  PYVISTA_OFF_SCREEN: false
+  PYVISTA_JUPYTER_BACKEND: "html"
+  LIBGL_ALWAYS_SOFTWARE: 1
+  DISPLAY: ":99.0"
+jobs:
+  build-docs:
+    env:
+      DEB_PYTHON_INSTALL_LAYOUT: deb_system
+      PYVISTA_JUPYTER_BACKEND: "html"
+
+    runs-on: ubuntu-24.04
+    container: ghcr.io/fenics/dolfinx/dolfinx:stable
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install graphviz and pyvista deps
+        run: |
+          apt-get update 
+          apt-get install -y libgl1-mesa-dev xvfb
+
+      - name: Update pip
+        run: python3 -m pip install --upgrade pip setuptools
+
+      - name: Install dependencies
+        run: python3 -m pip install -e ".[dev]"
+
+      - name: Build docs
+        run: jupyter book build -W .
+
+      - name: Upload documentation as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: documentation
+          path: ${{ env.PUBLISH_DIR }}
+          if-no-files-found: error

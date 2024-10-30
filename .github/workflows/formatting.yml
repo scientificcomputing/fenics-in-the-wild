@@ -1,0 +1,33 @@
+name: Check formatting
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_call:
+  schedule:
+    - cron: "0 8 * * *"
+
+env:
+  DEB_PYTHON_INSTALL_LAYOUT: deb_system
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    container: ghcr.io/fenics/dolfinx/dolfinx:stable
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update pip
+        run: python3 -m pip install --break-system-packages --upgrade pip setuptools
+
+      - name: Install code
+        run: python3 -m pip install --break-system-packages .[dev]
+
+      - name: Check code formatting with ruff
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Mypy check
+        run: python3 -m mypy -v

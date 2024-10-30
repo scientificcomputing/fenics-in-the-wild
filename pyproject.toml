@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=64.4.0", "wheel", "pip>=22.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "FEniCSInTheWild"
+version = "0.1.0"
+dependencies = ["jupyter-book", "pydata-sphinx-theme"]
+
+[project.optional-dependencies]
+dev = ["pdbpp", "ipython", "jupytext", "ruff"]
+
+[tool.setuptools]
+packages = []
+
+
+[tool.jupytext]
+formats = "ipynb,py:percent"
+
+
+[tool.ruff.lint.isort]
+known-first-party = ["basix", "dolfinx", "ffcx", "ufl", "wildmeshing"]
+known-third-party = ["numpy", "pytest", "pyvista"]
+section-order = [
+    "future",
+    "standard-library",
+    "mpi",
+    "third-party",
+    "first-party",
+    "local-folder",
+]
+
+[tool.ruff.lint.isort.sections]
+"mpi" = ["mpi4py", "petsc4py"]
