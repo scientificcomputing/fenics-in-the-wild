@@ -48,7 +48,7 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           platforms: linux/amd64 #,linux/arm64
 
-      - name: Test
+      - name: Build documentation
         run: docker run -v $(pwd):/home/wildfenics/shared -w /home/wildfenics/shared ${{ steps.metadata.outputs.tags }}
 
       - name: Upload documentation as artifact
