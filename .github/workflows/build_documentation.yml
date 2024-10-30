@@ -18,29 +18,39 @@ env:
   LIBGL_ALWAYS_SOFTWARE: 1
   DISPLAY: ":99.0"
 jobs:
-  build-docs:
-    env:
-      DEB_PYTHON_INSTALL_LAYOUT: deb_system
-      PYVISTA_JUPYTER_BACKEND: "html"
-
-    runs-on: ubuntu-24.04
-    container: ghcr.io/fenics/dolfinx/dolfinx:stable
+  build-image:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: linux/amd64 #,linux/arm64
 
-      - name: Install graphviz and pyvista deps
-        run: |
-          apt-get update 
-          apt-get install -y libgl1-mesa-dev xvfb
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-      - name: Update pip
-        run: python3 -m pip install --upgrade pip setuptools
+      - name: Extract metadata for all images
+        id: metadata
+        uses: docker/metadata-action@v4
+        with:
+          images: fenics-wild-docs
 
-      - name: Install dependencies
-        run: python3 -m pip install -e ".[dev]"
+      - name: Build upload-predictions image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: Dockerfile
+          pull: false
+          load: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          platforms: linux/amd64 #,linux/arm64
+          build-args: |
+            USERNAME=$(whoami)
+            UID=$(id -u)
 
-      - name: Build docs
-        run: jupyter book build -W .
+      - name: Test
+        run: docker run ${{ steps.metadata.outputs.tags }} -v $(pwd):/home/$(whoami)/shared -w /homw/$(whoami)/shared
 
       - name: Upload documentation as artifact
         uses: actions/upload-artifact@v4
