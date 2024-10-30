@@ -7,11 +7,12 @@ defaults:
 parts:
   - caption: "FEniCS in the Wild"
     chapters:
-      - file: installation
+      - file: src/installation
 
   - caption: "Use cases"
     chapters:
-      - file: usecases
+      - file: src/usecases
         sections:
-          - file: ucs/uc1
-          - file: ucs/uc2
+          - file: src/ucs/uc1
+          - file: src/ucs/uc2
+      - file: src/glossary
