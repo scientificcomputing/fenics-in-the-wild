@@ -37,7 +37,7 @@ jobs:
         with:
           images: fenics-wild-docs
 
-      - name: Build upload-predictions image
+      - name: Build documentation builder image
         uses: docker/build-push-action@v6
         with:
           context: .
