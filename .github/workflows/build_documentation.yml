@@ -47,12 +47,9 @@ jobs:
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           platforms: linux/amd64 #,linux/arm64
-          build-args: |
-            USERNAME=$(whoami)
-            UID=$(id -u)
 
       - name: Test
-        run: docker run ${{ steps.metadata.outputs.tags }} -v $(pwd):/home/$(whoami)/shared -w /homw/$(whoami)/shared
+        run: docker run ${{ steps.metadata.outputs.tags }} -v $(pwd):/home/wildfenics/shared -w /homw/wildfenics/shared
 
       - name: Upload documentation as artifact
         uses: actions/upload-artifact@v4
