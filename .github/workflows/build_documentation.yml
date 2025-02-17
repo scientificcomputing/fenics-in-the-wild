@@ -41,7 +41,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
+          file: docker/Dockerfile.webpage
           pull: false
           load: true
           tags: ${{ steps.metadata.outputs.tags }}
@@ -51,7 +51,8 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build documentation
-        run: docker run -v $(pwd):/root/shared -w /root/shared ${{ steps.metadata.outputs.tags }}
+        run: |
+          docker run -v $(pwd):/root/shared -w /root/shared ${{ steps.metadata.outputs.tags }}
 
       - name: Upload documentation as artifact
         uses: actions/upload-artifact@v4
