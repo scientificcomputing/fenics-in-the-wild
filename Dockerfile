@@ -1,5 +1,4 @@
-FROM ghcr.io/fenicsproject/dolfinx/lab:stable
-
+FROM ghcr.io/fenics/dolfinx/lab:stable
 
 # create user with a home directory
 ARG NB_USER=jovyan
