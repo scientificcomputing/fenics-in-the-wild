@@ -18,8 +18,8 @@ ENV WILDFENICS_DATA_PATH=${WILDFENICS_EXTRACT_PATH}/mhornkjol-mri2fem-ii-chapter
 # Download stl files
 RUN apt-get update && apt-get install -y wget unzip
 RUN wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-3-code-v1.0.0.zip && \
-    unzip mri2fem-ii-chapter-3-code-v1.0.0.zip -d ${ENV WILDFENICS_EXTRACT_PATH="${HOME}/src/stl_files"
-}
+    unzip mri2fem-ii-chapter-3-code-v1.0.0.zip -d ${ENV WILDFENICS_EXTRACT_PATH}
+
 
 ENV PYVISTA_TRAME_SERVER_PROXY_PREFIX="/proxy/"
 ENV PYVISTA_TRAME_SERVER_PROXY_ENABLED="True"
