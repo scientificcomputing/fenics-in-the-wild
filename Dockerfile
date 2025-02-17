@@ -1,18 +1,19 @@
 FROM ghcr.io/fenics/dolfinx/lab:stable
 
 
-# # create user with a home directory
-# ARG NB_USER=jovyan
-# ARG NB_UID=1000
-# # 24.04 adds `ubuntu` as uid 1000;
-# # remove it if it already exists before creating our user
-# RUN id -nu ${NB_UID} && userdel --force $(id -nu ${NB_UID}) || true; \
-#     useradd -m ${NB_USER} -u ${NB_UID}
-# ENV HOME=/home/${NB_USER}
+# create user with a home directory
+ARG NB_USER=jovyan
+ARG NB_UID=1000
+# 24.04 adds `ubuntu` as uid 1000;
+# remove it if it already exists before creating our user
+RUN id -nu ${NB_UID} && userdel --force $(id -nu ${NB_UID}) || true; \
+    useradd -m ${NB_USER} -u ${NB_UID}
+ENV HOME=/home/${NB_USER}
 
 # Copy home directory for usage in binder
-# WORKDIR ${HOME}
-# COPY --chown=${NB_UID} . ${HOME}
+WORKDIR ${HOME}
+COPY --chown=${NB_UID} . ${HOME}
+
 # Download stl files
 RUN apt-get update && apt-get install -y wget unzip
 RUN wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-3-code-v1.0.0.zip && \
@@ -22,10 +23,8 @@ ENV PYVISTA_TRAME_SERVER_PROXY_PREFIX="/proxy/"
 ENV PYVISTA_TRAME_SERVER_PROXY_ENABLED="True"
 ENV PYVISTA_JUPYTER_BACKEND="html"
 ENV DISPLAY=:99
-COPY . .
 RUN python3 -m pip install .[dev]
 
 ENV DISPLAY=:99
-#USER ${NB_USER}
-#CMD ["python3", "-m", "jupyter", "book", "build", "."] 
-ENTRYPOINT ["/bin/bash"]
+USER ${NB_USER}
+ENTRYPOINT []
