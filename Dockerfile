@@ -24,5 +24,5 @@ ENV PYVISTA_TRAME_SERVER_PROXY_PREFIX="/proxy/"
 ENV PYVISTA_TRAME_SERVER_PROXY_ENABLED="True"
 
 USER ${NB_USER}
-CMD ["jupyter", "book", "build" "."]
+CMD ["python3", "-m", "jupyter", "book", "build" "."]
 ENTRYPOINT []
