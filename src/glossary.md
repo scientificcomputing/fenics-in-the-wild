@@ -1,5 +1,7 @@
 # Glossary
 
+## Medical imaging
+
 ```{glossary}
 MRI
     Magnetic resonance imaging - A medical imaging technique using strong magnetic fields to generate images of organs.
@@ -14,3 +16,16 @@ CT
     Computed Tomography - A medical imaging technique using {term}`X-ray`s to create detailed images of bone and soft tissue.
     Also known as a CAT scan (Computed axial tomography)
 ```
+
+## Brain physiology
+
+```{glossary}
+PVS
+    Paravascular space - The fluid area surrounding arteries in the brain.
+
+CSF
+    Cerebrospinal fluid - The fluid that surruounds the brain and spinal coord.
+
+```
+
+## Finite element methods
