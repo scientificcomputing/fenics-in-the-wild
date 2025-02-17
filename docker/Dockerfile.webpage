@@ -1,17 +1,22 @@
 FROM ghcr.io/fenics/dolfinx/lab:stable
 
 RUN apt-get update && apt-get install -y wget unzip
-RUN wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-3-code-v1.0.0.zip && \
-    unzip mri2fem-ii-chapter-3-code-v1.0.0.zip -d stl_files
 
 ENV PYVISTA_TRAME_SERVER_PROXY_PREFIX="/proxy/"
 ENV PYVISTA_TRAME_SERVER_PROXY_ENABLED="True"
 ENV PYVISTA_JUPYTER_BACKEND="html"
 ENV DISPLAY=:99
 COPY . .
+
+WORKDIR /root/data
+ENV WILDFENICS_EXTRACT_PATH="/root/data/stl_files"
+ENV WILDFENICS_DATA_PATH=${WILDFENICS_EXTRACT_PATH}/mhornkjol-mri2fem-ii-chapter-3-code-ff74dab/stl_files
+RUN wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-3-code-v1.0.0.zip && \
+    unzip mri2fem-ii-chapter-3-code-v1.0.0.zip -d ${WILDFENICS_EXTRACT_PATH}
+
+WORKDIR /root
 RUN python3 -m pip install .[dev]
 
 ENV DISPLAY=:99
-USER ${NB_USER}
 CMD ["python3", "-m", "jupyter", "book", "build", "."] 
 ENTRYPOINT []

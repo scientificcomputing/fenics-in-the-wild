@@ -13,11 +13,13 @@ ENV HOME=/home/${NB_USER}
 # Copy home directory for usage in binder
 WORKDIR ${HOME}
 COPY --chown=${NB_UID} . ${HOME}
-
+ENV WILDFENICS_EXTRACT_PATH="${HOME}/src/stl_files"
+ENV WILDFENICS_DATA_PATH=${WILDFENICS_EXTRACT_PATH}/mhornkjol-mri2fem-ii-chapter-3-code-ff74dab/stl_files
 # Download stl files
 RUN apt-get update && apt-get install -y wget unzip
 RUN wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-3-code-v1.0.0.zip && \
-    unzip mri2fem-ii-chapter-3-code-v1.0.0.zip -d stl_files
+    unzip mri2fem-ii-chapter-3-code-v1.0.0.zip -d ${ENV WILDFENICS_EXTRACT_PATH="${HOME}/src/stl_files"
+}
 
 ENV PYVISTA_TRAME_SERVER_PROXY_PREFIX="/proxy/"
 ENV PYVISTA_TRAME_SERVER_PROXY_ENABLED="True"
@@ -25,6 +27,5 @@ ENV PYVISTA_JUPYTER_BACKEND="html"
 ENV DISPLAY=:99
 RUN python3 -m pip install .[dev]
 
-ENV DISPLAY=:99
 USER ${NB_USER}
 ENTRYPOINT []
