@@ -15,5 +15,13 @@ COPY --chown=${NB_UID} . ${HOME}
 
 RUN python3 -m pip install .
 
+# Download stl files
+RUN apt-get update && apt-get install -y wget unzip
+RUN wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-3-code-v1.0.0.zip && \
+    unzip mri2fem-ii-chapter-3-code-v1.0.0.zip -d stl_files
+
+ENV PYVISTA_TRAME_SERVER_PROXY_PREFIX="/proxy/"
+ENV PYVISTA_TRAME_SERVER_PROXY_ENABLED="True"
+
 USER ${NB_USER}
 ENTRYPOINT []

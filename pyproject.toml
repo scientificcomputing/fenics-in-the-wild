@@ -8,7 +8,7 @@ version = "0.1.0"
 dependencies = ["jupyter-book", "pydata-sphinx-theme", "wildmeshing"]
 
 [project.optional-dependencies]
-dev = ["pdbpp", "ipython", "jupytext", "ruff", "mypy"]
+dev = ["pdbpp", "ipython", "jupytext", "ruff", "mypy", "pyvista[jupyter]"]
 
 [tool.setuptools]
 packages = []
