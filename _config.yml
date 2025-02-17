@@ -32,31 +32,31 @@ launch_buttons:
   notebook_interface: "jupyterlab"
   binderhub_url: "https://mybinder.org"
 
-sphinx:
-  config:
-    templates_path: ["_templates"]
-    html_last_updated_fmt: "%b %d, %Y"
-    suppress_warnings: ["mystnb.unknown_mime_type"]
-    html_show_copyright: true
-    html_show_sourcelink: false
-    html_theme: pydata_sphinx_theme
-    html_theme_options:
-      show_toc_level: 2
-      show_nav_level: 1
-      collapse_navigation: True
-      footer_start: ["copyright"]
-      footer_center: ["footer"]
-      footer_end: ["theme-version"]
-      use_edit_page_button: False
-    html_context:
-      github_user: meg-simula
-      github_repo: fenics-in-the-wild
-      github_version: main
-    html_sidebars:
-      "**": []
+# sphinx:
+#   config:
+# templates_path: ["_templates"]
+# html_last_updated_fmt: "%b %d, %Y"
+# suppress_warnings: ["mystnb.unknown_mime_type"]
+# html_show_copyright: true
+# html_show_sourcelink: false
+# html_theme: pydata_sphinx_theme
+# html_theme_options:
+#   show_toc_level: 2
+#   show_nav_level: 1
+#   collapse_navigation: True
+#   footer_start: ["copyright"]
+#   footer_center: ["footer"]
+#   footer_end: ["theme-version"]
+#   use_edit_page_button: False
+# html_context:
+#   github_user: scientificcomputing
+#   github_repo: fenics-in-the-wild
+#   github_version: main
+# html_sidebars:
+#   "**": []
 
-    # html_sidebars:
-    #   "**": []
+# html_sidebars:
+#   "**": []
 parse:
   myst_enable_extensions:
     - "amsmath"
