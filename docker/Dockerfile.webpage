@@ -8,7 +8,6 @@ ENV PYVISTA_JUPYTER_BACKEND="html"
 ENV LIBGL_ALWAYS_SOFTWARE=1
 
 ENV DISPLAY=:99
-COPY . .
 
 WORKDIR /root/data
 ENV WILDFENICS_EXTRACT_PATH="/root/data/stl_files"
@@ -16,7 +15,8 @@ ENV WILDFENICS_DATA_PATH=${WILDFENICS_EXTRACT_PATH}/mhornkjol-mri2fem-ii-chapter
 RUN wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-3-code-v1.0.0.zip && \
     unzip mri2fem-ii-chapter-3-code-v1.0.0.zip -d ${WILDFENICS_EXTRACT_PATH}
 
-WORKDIR /root
+WORKDIR /root/src
+COPY . .
 RUN python3 -m pip install .[dev]
 
 ENV DISPLAY=:99
