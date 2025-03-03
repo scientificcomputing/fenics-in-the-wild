@@ -19,7 +19,7 @@ parser.add_argument("--quality", type=float, default=10, required=False)
 parser.add_argument("--max_its", type=int, default=30, required=False)
 parser.add_argument("--relative_edge_length", type=float, default=0.01, required=False)
 parser.add_argument("--num_threads", type=int, default=3, required=False)
-parser.add_argument("--epsilon", type=float, default=5e-4, required=False)
+parser.add_argument("--epsilon", type=float, default=2.5e-4, required=False)
 args = parser.parse_args()
 folder = args.data_path
 assert folder.exists(), "Could not find stl files"
@@ -38,18 +38,6 @@ tree = {
             "left": str((folder / "final-white.stl").absolute().as_posix()),
             "right": str((folder / "final-ventricles.stl").absolute().as_posix()),
         },
-        # "right": {
-        # "operation": "union",
-        # "right": {
-        #     "operation": "union",
-        #     "left": str(
-        #         (folder / "rhchoroid.plexus.final.stl").absolute().as_posix()
-        #     ),
-        #     "right": str(
-        #         (folder / "lhchoroid.plexus.final.stl").absolute().as_posix()
-        #     ),
-        # },
-        # },
     },
 }
 
