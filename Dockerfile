@@ -13,14 +13,16 @@ ENV HOME=/home/${NB_USER}
 # Copy home directory for usage in binder
 WORKDIR ${HOME}
 COPY --chown=${NB_UID} . ${HOME}
-ENV WILDFENICS_EXTRACT_PATH="${HOME}/src/stl_files"
-ENV WILDFENICS_DATA_PATH=${WILDFENICS_EXTRACT_PATH}/mhornkjol-mri2fem-ii-chapter-3-code-ff74dab/stl_files
+
+WORKDIR ${HOME}/data
 # Download stl files
 RUN apt-get update && apt-get install -y wget unzip
-RUN wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-3-code-v1.0.0.zip && \
-    unzip mri2fem-ii-chapter-3-code-v1.0.0.zip -d ${WILDFENICS_EXTRACT_PATH}
+RUN wget -nc https://zenodo.org/records/14536218/files/mri2femii-chp2-dataset.tar.gz
+RUN tar xvzf mri2femii-chp2-dataset.tar.gz -C ${WILDFENICS_EXTRACT_PATH}
+ENV WILDFENICS_EXTRACT_PATH="/root/data/"
+ENV WILDFENICS_DATA_PATH=${WILDFENICS_EXTRACT_PATH}/mri2femii-chp2-dataset/Gonzo/output
 
-
+WORKDIR ${HOME}
 ENV PYVISTA_TRAME_SERVER_PROXY_PREFIX="/proxy/"
 ENV PYVISTA_TRAME_SERVER_PROXY_ENABLED="True"
 ENV PYVISTA_JUPYTER_BACKEND="html"
