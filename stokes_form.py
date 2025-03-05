@@ -35,3 +35,39 @@ csf_mesh, cell_map, vertex_map, node_map, new_et = extract_submesh(mesh, ct, (1,
 with dolfinx.io.XDMFFile(csf_mesh.comm, "csf.xdmf", "w") as xdmf:
     xdmf.write_mesh(csf_mesh)
     xdmf.write_meshtags(new_et, csf_mesh.geometry)
+# with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "csf.xdmf", "r") as xdmf:
+#     csf_mesh = xdmf.read_mesh()
+# xdmf.write_meshtags(new_et, csf_mesh.geometry)
+
+import nibabel
+import nibabel.affines as naff
+from pathlib import Path
+import time
+
+image = nibabel.load("/root/data/mri2femii-chp2-dataset/Gonzo/mri/aseg.mgz")
+nibabel.save(image, "aseg.nii")
+
+
+# def read_mri_data(filename: Path, mesh: dolfinx.mesh.Mesh, tag: dolfinx.mesh.MeshTags, markers: tuple[int,...]):
+
+data = image.get_fdata().astype(np.int32)
+vox2ras = image.header.get_vox2ras_tkr()
+ras2vox = np.linalg.inv(vox2ras)
+
+
+cells = new_et.indices[np.isin(new_et.values, (5,))]
+midpoints = dolfinx.mesh.compute_midpoints(csf_mesh, new_et.dim, cells)
+
+
+start = time.perf_counter()
+ijk_vectorized = naff.apply_affine(ras2vox, midpoints)
+# Round indices to nearest integer
+ijk_rounded = np.rint(ijk_vectorized).astype("int")
+cell_data = data[ijk_rounded[:, 0], ijk_rounded[:, 1], ijk_rounded[:, 2]]
+end = time.perf_counter()
+print("Elapsed time vectorized: ", end - start)
+
+cf = dolfinx.mesh.meshtags(csf_mesh, new_et.dim, cells, cell_data)
+with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "csf_voxel_data.xdmf", "w") as xdmf:
+    xdmf.write_mesh(csf_mesh)
+    xdmf.write_meshtags(cf, csf_mesh.geometry)
