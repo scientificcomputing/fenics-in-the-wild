@@ -39,6 +39,19 @@ with dolfinx.io.XDMFFile(csf_mesh.comm, "csf.xdmf", "w") as xdmf:
 #     csf_mesh = xdmf.read_mesh()
 # xdmf.write_meshtags(new_et, csf_mesh.geometry)
 
+
+import basix.ufl
+from scifem.xdmf import create_pointcloud
+
+q_el = element = basix.ufl.quadrature_element(
+    scheme="default", degree=2, cell=csf_mesh.basix_cell()
+)
+Q = dolfinx.fem.functionspace(csf_mesh, q_el)
+tabs = Q.tabulate_dof_coordinates()
+q = dolfinx.fem.Function(Q)
+
+
+print(len(q.x.array))
 import nibabel
 import nibabel.affines as naff
 from pathlib import Path
@@ -55,9 +68,9 @@ vox2ras = image.header.get_vox2ras_tkr()
 ras2vox = np.linalg.inv(vox2ras)
 
 
-cells = new_et.indices[np.isin(new_et.values, (5,))]
-midpoints = dolfinx.mesh.compute_midpoints(csf_mesh, new_et.dim, cells)
-
+# cells = new_et.indices[np.isin(new_et.values, (5,))]
+# midpoints = dolfinx.mesh.compute_midpoints(csf_mesh, new_et.dim, cells)
+midpoints = tabs
 
 start = time.perf_counter()
 ijk_vectorized = naff.apply_affine(ras2vox, midpoints)
@@ -66,8 +79,10 @@ ijk_rounded = np.rint(ijk_vectorized).astype("int")
 cell_data = data[ijk_rounded[:, 0], ijk_rounded[:, 1], ijk_rounded[:, 2]]
 end = time.perf_counter()
 print("Elapsed time vectorized: ", end - start)
+q.x.array[:] = cell_data
+scifem.xdmf.create_pointcloud("create_pointcloud.xdmf", [q])
 
-cf = dolfinx.mesh.meshtags(csf_mesh, new_et.dim, cells, cell_data)
-with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "csf_voxel_data.xdmf", "w") as xdmf:
-    xdmf.write_mesh(csf_mesh)
-    xdmf.write_meshtags(cf, csf_mesh.geometry)
+# cf = dolfinx.mesh.meshtags(csf_mesh, new_et.dim, cells, cell_data)
+# with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "csf_voxel_data.xdmf", "w") as xdmf:
+#     xdmf.write_mesh(csf_mesh)
+#     xdmf.write_meshtags(cf, csf_mesh.geometry)
