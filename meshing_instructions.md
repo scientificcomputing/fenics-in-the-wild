@@ -62,7 +62,7 @@ contains surfaces (`stl`-files) for a subset of regions in the brain:
 The data can be extracted with:
 
 ```bash
-wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-3-code-v1.0.0.zip && \
+wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-3-code-v1.0.0.zip
 unzip mri2fem-ii-chapter-3-code-v1.0.0.zip
 ```
 
@@ -90,4 +90,20 @@ An example of a config file for `wildmeshing` is:
 
 ## Data from the paper In-silico molecular enrichment and clearance of the human intracranial space
 
-https://doi.org/10.5281/zenodo.14749162
+Data [DOI: 10.5281/zenodo.14749162](https://doi.org/10.5281/zenodo.14749162) from the paper by Marius Causemann et al. 2025 [DOI: 10.1101/2025.01.30.635680 ](https://doi.org/10.1101/2025.01.30.635680).
+
+There following regions of the brain has been marked:
+
+- The dura (`skull.ply`): The outer layer towards the skull
+- The brain parenchyma (`parenchyma_incl_ventricles.ply`): The part of the brain containing white and grey matter, both the Cerebrum and the Cerebellum.
+- The lateral ventricles (`LV.ply`): The part of the ventricular network where cerebrospinal fluid is produced.
+- The third and fourth ventricles (`V34.ply`): The part of the ventricular network that connects the lateral ventricles to the subarachnoid space.
+
+Other surfaces not used directly in the mesh generation is `parenchyma.ply`, which includes an interface towards the ventricles. The surface `cerebrum.ply` is also not used, as it does not contain the cerebellum (little brain).
+
+The surfaces can be extracted with:
+
+```bash
+wget -nc https://zenodo.org/records/14749163/files/surfaces.zip
+unzip surfaces.zip
+```
