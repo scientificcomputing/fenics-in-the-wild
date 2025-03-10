@@ -17,9 +17,9 @@ parser.add_argument(
 parser.add_argument("--output_path", type=Path, default="brain.xdmf", required=False)
 parser.add_argument("--quality", type=float, default=10, required=False)
 parser.add_argument("--max_its", type=int, default=30, required=False)
-parser.add_argument("--relative_edge_length", type=float, default=0.01, required=False)
-parser.add_argument("--num_threads", type=int, default=3, required=False)
-parser.add_argument("--epsilon", type=float, default=2.5e-4, required=False)
+parser.add_argument("--relative_edge_length", type=float, default=0.015, required=False)
+parser.add_argument("--num_threads", type=int, default=5, required=False)
+parser.add_argument("--epsilon", type=float, default=0.0009, required=False)
 args = parser.parse_args()
 folder = args.data_path
 assert folder.exists(), "Could not find stl files"
