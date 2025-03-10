@@ -8,7 +8,7 @@ import numpy as np
 import ufl
 import basix.ufl
 import os
-
+import typing
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -23,31 +23,49 @@ parser.add_argument("--epsilon", type=float, default=2.5e-4, required=False)
 args = parser.parse_args()
 folder = args.data_path
 assert folder.exists(), "Could not find stl files"
-tree = {
+org_tree = {
     "operation": "union",
-    "left": str((folder / "final-dura.stl").absolute().as_posix()),
+    "left": "skull.ply",
     "right": {
         "operation": "union",
-        "left": {
-            "operation": "union",
-            "left": str((folder / "final-lhpial.stl").absolute().as_posix()),
-            "right": str((folder / "final-rhpial.stl").absolute().as_posix()),
-        },
-        "right": {
-            "operation": "union",
-            "left": str((folder / "final-white.stl").absolute().as_posix()),
-            "right": str((folder / "final-ventricles.stl").absolute().as_posix()),
-        },
+        "left": "parenchyma_incl_ventr.ply",
+        "right": {"operation": "union", "left": "LV.ply", "right": "V34.ply"},
     },
 }
 
+
+def add_folder_path(folder: Path, org_tree: dict[str, typing.Any]):
+    """Modify a file tree structure to include the full path to the files
+
+    Args:
+        folder: Path object pointing to the folder containing the files
+        org_tree: _description_
+
+    Returns:
+        _description_
+    """
+    tree = org_tree.copy()
+    for key, value in org_tree.items():
+        if isinstance(value, dict):
+            tree[key] = add_folder_path(folder, value)
+        else:
+            if (folder / value).is_file():
+                tree[key] = str((folder / value).absolute())
+    return tree
+
+
+tree = add_folder_path(folder, org_tree)
+
 tetra = wildmeshing.Tetrahedralizer(
     stop_quality=args.quality,
+    # Optimal energy is 4, not smaller than 8
+    # stop energy "amips" value
     max_its=args.max_its,
-    edge_length_r=args.relative_edge_length,
+    edge_length_r=args.relative_edge_length,  # Global edge length
     max_threads=args.num_threads,
-    epsilon=args.epsilon,
+    epsilon=args.epsilon,  # Envelope thickness (freedom to move from surface)
 )
+
 tetra.load_csg_tree(json.dumps(tree))
 
 # Create mesh

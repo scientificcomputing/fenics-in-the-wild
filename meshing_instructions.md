@@ -95,7 +95,7 @@ Data [DOI: 10.5281/zenodo.14749162](https://doi.org/10.5281/zenodo.14749162) fro
 There following regions of the brain has been marked:
 
 - The dura (`skull.ply`): The outer layer towards the skull
-- The brain parenchyma (`parenchyma_incl_ventricles.ply`): The part of the brain containing white and grey matter, both the Cerebrum and the Cerebellum.
+- The brain parenchyma (`parenchyma_incl_ventr.ply`): The part of the brain containing white and grey matter, both the Cerebrum and the Cerebellum.
 - The lateral ventricles (`LV.ply`): The part of the ventricular network where cerebrospinal fluid is produced.
 - The third and fourth ventricles (`V34.ply`): The part of the ventricular network that connects the lateral ventricles to the subarachnoid space.
 
@@ -106,4 +106,22 @@ The surfaces can be extracted with:
 ```bash
 wget -nc https://zenodo.org/records/14749163/files/surfaces.zip
 unzip surfaces.zip
+```
+
+An example configuration for wildmeshing would be
+
+```json
+{
+  "operation": "union",
+  "left": "skull.ply",
+  "right": {
+    "operation": "union",
+    "left": "parenchyma_incl_ventr.ply",
+    "right": {
+      "operation": "union",
+      "left": "LV.ply",
+      "right": "V34.ply"
+    }
+  }
+}
 ```
