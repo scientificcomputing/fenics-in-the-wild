@@ -152,6 +152,7 @@ def define_subdomain_markers(
     facet_marker[internal_walls] = interface_map["PAR_SAS"]
     facet_marker[inflow_facets] = interface_map["LV_PAR"]
     facet_marker[v34_walls] = interface_map["V34_PAR"]
+    facet_vec.scatter_forward()
     facet_marker = facet_marker.astype(np.int32)
     facet_pos = facet_marker > 0
     parent_ft = dolfinx.mesh.meshtags(
@@ -259,20 +260,20 @@ def stokes_solver(
     facet_markers: dolfinx.mesh.MeshTags,
     domain_map: dict[subdomains, tuple[int, ...]],
     facet_map: dict[interfaces, int],
-    mu: float = 1.0,
-    R0: float = 1e4,
-    sigma: float = 1.0,
-    u_in: float = 1e-4,
+    mu: float = 7e-3,
+    R0: float = 0,  # 1e4,
+    sigma: float = 10.0,
+    u_in: float = 4.63e-7,
 ) -> dolfinx.fem.Function:
     element_u = basix.ufl.element(
         basix.ElementFamily.BDM,
         mesh.basix_cell(),
-        2,
+        1,
     )
     element_p = basix.ufl.element(
         basix.ElementFamily.P,
         mesh.basix_cell(),
-        1,
+        0,
         discontinuous=True,
     )
     me = basix.ufl.mixed_element([element_u, element_p])
@@ -354,7 +355,7 @@ def stokes_solver(
     hA = ufl.avg(2.0 * ufl.Circumradius(mesh))
     a += (
         2
-        * mu
+        * mu_c
         * (sigma_c / hA)
         * ufl.inner(
             ufl.jump(tangent_projection(u, n)), ufl.jump(tangent_projection(v, n))
@@ -368,12 +369,6 @@ def stokes_solver(
     L = ufl.inner(f, v) * dx
 
     # Create inflow bcs, enforced strongly
-    print(
-        V.dofmap.index_map.size_global * V.dofmap.index_map_bs,
-        mesh.topology.index_map(3).size_global,
-        W.dofmap.index_map.size_global * W.dofmap.index_map_bs,
-    )
-    exit()
     cffi_options = ["-Ofast", "-march=native"]
     jit_options = {
         "cffi_extra_compile_args": cffi_options,
@@ -394,11 +389,8 @@ def stokes_solver(
 
 if __name__ == "__main__":
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "test_marius.xdmf", "r") as xdmf:
-        mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.shared_facet)
+        mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.none)
         ct = xdmf.read_meshtags(mesh, name="mesh_tags")
-
-    def upper_skull(x, upper_skull_z=0.027):
-        return x[2] - 0.8 * x[1] > upper_skull_z
 
     subdomain_map = {
         "PAR": (2,),
@@ -413,16 +405,46 @@ if __name__ == "__main__":
         "AM_U": 3,
         "AM_L": 4,
     }
-    parent_ft = define_subdomain_markers(
-        mesh, ct, subdomain_map, interface_map, upper_skull
+
+    # Refine parent mesh within ventricles
+    refine_cells = ct.indices[np.isin(ct.values, subdomain_map["V34"])]
+    mesh.topology.create_connectivity(mesh.topology.dim, 1)
+    edges = dolfinx.mesh.compute_incident_entities(
+        mesh.topology, refine_cells, mesh.topology.dim, 1
     )
-    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "parent_facets.xdmf", "w") as xdmf:
-        xdmf.write_mesh(mesh)
-        xdmf.write_meshtags(parent_ft, mesh.geometry)
+    partitioner = dolfinx.cpp.mesh.create_cell_partitioner(
+        dolfinx.mesh.GhostMode.shared_facet
+    )
+
+    refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
+        mesh,
+        edges,
+        partitioner=None,
+        option=dolfinx.mesh.RefinementOption.parent_cell,
+    )
+    refined_ct = dolfinx.mesh.transfer_meshtag(ct, refined_mesh, parent_cell)
+
+    with dolfinx.io.XDMFFile(refined_mesh.comm, "refined.xdmf", "w") as xdmf:
+        xdmf.write_mesh(refined_mesh)
+        xdmf.write_meshtags(refined_ct, refined_mesh.geometry)
+
+    refined_mesh.comm.Barrier()
+
+    with dolfinx.io.XDMFFile(refined_mesh.comm, "refined.xdmf", "r") as xdmf:
+        refined_mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.shared_facet)
+        refined_ct = xdmf.read_meshtags(refined_mesh, name="mesh_tags")
+
+    def upper_skull(x, upper_skull_z=0.027):
+        return x[2] - 0.8 * x[1] > upper_skull_z
+
+    parent_ft = define_subdomain_markers(
+        refined_mesh, refined_ct, subdomain_map, interface_map, upper_skull
+    )
 
     csf_mesh, cell_map, vertex_map, node_map, csf_markers = extract_submesh(
-        mesh, ct, (1, 3, 4)
+        refined_mesh, refined_ct, (1, 3, 4)
     )
+
     interface_marker, _ = scifem.transfer_meshtags_to_submesh(
         parent_ft, csf_mesh, vertex_map, cell_map
     )
@@ -435,6 +457,12 @@ if __name__ == "__main__":
         )
         xdmf.write_meshtags(interface_marker, csf_mesh.geometry)
 
-    w_submesh = stokes_solver(
+    uh, ph = stokes_solver(
         csf_mesh, csf_markers, interface_marker, subdomain_map, interface_map
     )
+
+    V_out = dolfinx.fem.functionspace(csf_mesh, ("DG", 2, (csf_mesh.geometry.dim,)))
+    u_out = dolfinx.fem.Function(V_out, name="Velocity")
+    u_out.interpolate(uh)
+    with dolfinx.io.VTXWriter(csf_mesh.comm, "uh.bp", [u_out], engine="BP4") as bp:
+        bp.write(0.0)
