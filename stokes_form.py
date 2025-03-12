@@ -280,6 +280,14 @@ def stokes_solver(
     me = basix.ufl.mixed_element([element_u, element_p])
     W = dolfinx.fem.functionspace(mesh, me)
 
+    if mesh.comm.rank == 0:
+        cell_map = mesh.topology.index_map(mesh.topology.dim)
+        vertex_map = mesh.topology.index_map(0)
+        print(
+            f"Num cells: {cell_map.size_global} Num vertices: {vertex_map.size_global}",
+            f"\nNum dofs: {W.dofmap.index_map.size_global * W.dofmap.index_map_bs}",
+        )
+
     # Create inflow boundary condition
     V, _ = W.sub(0).collapse()
     n = ufl.FacetNormal(mesh)
