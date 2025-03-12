@@ -262,7 +262,7 @@ def stokes_solver(
     facet_map: dict[interfaces, int],
     mu: float = 7e-3,
     R0: float = 0,  # 1e4,
-    sigma: float = 10.0,
+    sigma: float = 100.0,
     u_in: float = 4.63e-7,
     degree: int = 2,
 ) -> dolfinx.fem.Function:
@@ -274,7 +274,7 @@ def stokes_solver(
     element_p = basix.ufl.element(
         basix.ElementFamily.P,
         mesh.basix_cell(),
-        degree=1,
+        degree=degree-1,
         discontinuous=True,
     )
     me = basix.ufl.mixed_element([element_u, element_p])
@@ -402,7 +402,7 @@ def stokes_solver(
         "ksp_error_if_not_converged": True,
         "pc_factor_mat_solver_type": "mumps",
         "mat_mumps_icntl_14": 100,
-        # "mat_mumps_icntl_24": 1,
+        "mat_mumps_icntl_24": 1,
         # "mat_mumps_icntl_25": 1,
     }
     problem = dolfinx.fem.petsc.LinearProblem(
@@ -434,22 +434,23 @@ if __name__ == "__main__":
 
     fluid_domains = subdomain_map["LV"] + subdomain_map["SAS"] + subdomain_map["V34"]
 
-    num_refinements = 2
+    # Refine parent mesh within ventricles
+    num_refinements = 1
     for i in range(num_refinements):
         # Refine parent mesh within ventricles
-        # refine_cells = ct.indices[
-        #     np.isin(
-        #         ct.values,
-        #         np.asarray(subdomain_map["V34"] + subdomain_map["LV"]),
-        #     )
-        # ]
+        refine_cells = ct.indices[
+            np.isin(
+                ct.values,
+                np.asarray(subdomain_map["V34"] + subdomain_map["LV"]),
+            )
+        ]
 
         # Find all cells that are on the "boundary" of the fluid mesh. Currently, as ghost mode doesn't
         # work with refinement, we do this through a submesh creation, similar to the one below.
         tmp_mesh, cell_map, vertex_map, node_map, csf_markers = extract_submesh(
             mesh,
             ct,
-            subdomain_map["LV"] + subdomain_map["V34"],
+            fluid_domains,
         )
         tmp_mesh.topology.create_connectivity(
             tmp_mesh.topology.dim - 1, tmp_mesh.topology.dim
@@ -462,6 +463,7 @@ if __name__ == "__main__":
             tmp_mesh.topology.dim,
         )
         left_ventricle_boundary_cells = cell_map[tmp_cells]
+        del tmp_mesh, tmp_cells, tmp_exterior_facets, cell_map, vertex_map, node_map, csf_markers
 
         # Find all cells associated with outer boundary (dura) and refine the cells they correspond to
         mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
@@ -474,7 +476,7 @@ if __name__ == "__main__":
         )
 
         cell_to_refine = np.unique(
-            np.hstack([boundary_cells, left_ventricle_boundary_cells])
+            np.hstack([boundary_cells, left_ventricle_boundary_cells, refine_cells])
         ).astype(np.int32)
         edges_to_refine = dolfinx.mesh.compute_incident_entities(
             mesh.topology, cell_to_refine, mesh.topology.dim, 1
@@ -575,6 +577,7 @@ if __name__ == "__main__":
     # interface_marker = dolfinx.mesh.meshtags(
     #     csf_mesh, csf_mesh.topology.dim - 1, indices, values
     # )
+    degree = 1
     uh, ph = stokes_solver(
         csf_mesh,
         csf_markers,
@@ -584,10 +587,10 @@ if __name__ == "__main__":
         mu=0.7e-3,
         u_in=4.63e-9,
         R0=1e4,
-        degree=2,
+        degree=degree,
     )
 
-    V_out = dolfinx.fem.functionspace(csf_mesh, ("DG", 2, (csf_mesh.geometry.dim,)))
+    V_out = dolfinx.fem.functionspace(csf_mesh, ("DG", degree, (csf_mesh.geometry.dim,)))
     u_out = dolfinx.fem.Function(V_out, name="Velocity")
     u_out.interpolate(uh)
     with dolfinx.io.VTXWriter(csf_mesh.comm, "uh.bp", [u_out], engine="BP4") as bp:
