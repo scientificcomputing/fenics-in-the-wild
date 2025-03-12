@@ -432,24 +432,56 @@ if __name__ == "__main__":
         mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.none)
         ct = xdmf.read_meshtags(mesh, name="mesh_tags")
 
-    # Refine parent mesh within ventricles
-    num_refinements = 1
+    fluid_domains = subdomain_map["LV"] + subdomain_map["SAS"] + subdomain_map["V34"]
+
+    num_refinements = 2
     for i in range(num_refinements):
-        refine_cells = ct.indices[
-            np.isin(
-                ct.values,
-                np.asarray(
-                    subdomain_map["V34"] + subdomain_map["LV"] + subdomain_map["SAS"]
-                ),
-            )
-        ]
-        mesh.topology.create_connectivity(mesh.topology.dim, 1)
-        edges = dolfinx.mesh.compute_incident_entities(
-            mesh.topology, refine_cells, mesh.topology.dim, 1
+        # Refine parent mesh within ventricles
+        # refine_cells = ct.indices[
+        #     np.isin(
+        #         ct.values,
+        #         np.asarray(subdomain_map["V34"] + subdomain_map["LV"]),
+        #     )
+        # ]
+
+        # Find all cells that are on the "boundary" of the fluid mesh. Currently, as ghost mode doesn't
+        # work with refinement, we do this through a submesh creation, similar to the one below.
+        tmp_mesh, cell_map, vertex_map, node_map, csf_markers = extract_submesh(
+            mesh,
+            ct,
+            subdomain_map["LV"] + subdomain_map["V34"],
+        )
+        tmp_mesh.topology.create_connectivity(
+            tmp_mesh.topology.dim - 1, tmp_mesh.topology.dim
+        )
+        tmp_exterior_facets = dolfinx.mesh.exterior_facet_indices(tmp_mesh.topology)
+        tmp_cells = dolfinx.mesh.compute_incident_entities(
+            tmp_mesh.topology,
+            tmp_exterior_facets,
+            tmp_mesh.topology.dim - 1,
+            tmp_mesh.topology.dim,
+        )
+        left_ventricle_boundary_cells = cell_map[tmp_cells]
+
+        # Find all cells associated with outer boundary (dura) and refine the cells they correspond to
+        mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
+        exterior_facet_indices = dolfinx.mesh.exterior_facet_indices(mesh.topology)
+        boundary_cells = dolfinx.mesh.compute_incident_entities(
+            mesh.topology,
+            exterior_facet_indices,
+            mesh.topology.dim - 1,
+            mesh.topology.dim,
+        )
+
+        cell_to_refine = np.unique(
+            np.hstack([boundary_cells, left_ventricle_boundary_cells])
+        ).astype(np.int32)
+        edges_to_refine = dolfinx.mesh.compute_incident_entities(
+            mesh.topology, cell_to_refine, mesh.topology.dim, 1
         )
         refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
             mesh,
-            edges,
+            edges_to_refine,
             partitioner=None,
             option=dolfinx.mesh.RefinementOption.parent_cell,
         )
@@ -474,7 +506,9 @@ if __name__ == "__main__":
     )
 
     csf_mesh, cell_map, vertex_map, node_map, csf_markers = extract_submesh(
-        refined_mesh, refined_ct, (1, 3, 4)
+        refined_mesh,
+        refined_ct,
+        fluid_domains,
     )
 
     interface_marker, _ = scifem.transfer_meshtags_to_submesh(
