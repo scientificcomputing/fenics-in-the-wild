@@ -533,8 +533,8 @@ if __name__ == "__main__":
         interface_marker,
         subdomain_map,
         interface_map,
-        u_in=1,
-        R0=0,
+        u_in=1e-9,
+        R0=1e4,
         degree=2,
     )
 
