@@ -426,7 +426,9 @@ if __name__ == "__main__":
 
     # Refine parent mesh within ventricles
     for i in range(2):
-        refine_cells = ct.indices[np.isin(ct.values, subdomain_map["V34"])]
+        refine_cells = ct.indices[
+            np.isin(ct.values, np.asarray(subdomain_map["V34"] + subdomain_map["LV"]))
+        ]
         mesh.topology.create_connectivity(mesh.topology.dim, 1)
         edges = dolfinx.mesh.compute_incident_entities(
             mesh.topology, refine_cells, mesh.topology.dim, 1
