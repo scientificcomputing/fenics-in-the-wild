@@ -18,7 +18,7 @@ parser.add_argument("--data_path", type=Path, default=default_data_path, require
 parser.add_argument("--output_path", type=Path, default="brain.xdmf", required=False)
 parser.add_argument("--quality", type=float, default=10, required=False)
 parser.add_argument("--max_its", type=int, default=30, required=False)
-parser.add_argument("--relative_edge_length", type=float, default=0.025, required=False)
+parser.add_argument("--relative_edge_length", type=float, default=0.01, required=False)
 parser.add_argument("--num_threads", type=int, default=5, required=False)
 parser.add_argument("--epsilon", type=float, default=0.0009, required=False)
 args = parser.parse_args()
