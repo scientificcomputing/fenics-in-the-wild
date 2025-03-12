@@ -8,6 +8,7 @@ import basix.ufl
 import numpy.typing as npt
 from packaging.version import Version
 import dolfinx.fem.petsc
+from time import perf_counter
 
 subdomains = typing.Literal["SAS", "LV", "V34"]
 interfaces = typing.Literal["LV_PAR", "V34_PAR", "AM_U", "AM_L", "EXTERNAL"]
@@ -408,7 +409,11 @@ def stokes_solver(
     problem = dolfinx.fem.petsc.LinearProblem(
         a, L, bcs=bcs, petsc_options=petsc_options, jit_options=jit_options
     )
+    tic = perf_counter()
     wh = problem.solve()
+    toc = perf_counter()
+    if mesh.comm.rank == 0:
+        print(f"Solving took: {toc-tic:.2e} seconds")
     return wh.sub(0).collapse(), wh.sub(1).collapse()
 
 
@@ -435,7 +440,7 @@ if __name__ == "__main__":
     fluid_domains = subdomain_map["LV"] + subdomain_map["SAS"] + subdomain_map["V34"]
 
     # Refine parent mesh within ventricles
-    num_refinements = 1
+    num_refinements = 2
     for i in range(num_refinements):
         # Refine parent mesh within ventricles
         refine_cells = ct.indices[
@@ -474,10 +479,15 @@ if __name__ == "__main__":
             mesh.topology.dim - 1,
             mesh.topology.dim,
         )
+        # For any further refinement, only refine the boundary of the fluid domains, not the interior
+        if i <1:
+            cell_to_refine = np.unique(
+                np.hstack([boundary_cells, left_ventricle_boundary_cells, refine_cells])
+            ).astype(np.int32)
 
-        cell_to_refine = np.unique(
-            np.hstack([boundary_cells, left_ventricle_boundary_cells, refine_cells])
-        ).astype(np.int32)
+        else:
+            cells_to_refine=left_ventricle_boundary_cells
+
         edges_to_refine = dolfinx.mesh.compute_incident_entities(
             mesh.topology, cell_to_refine, mesh.topology.dim, 1
         )
