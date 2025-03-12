@@ -425,15 +425,12 @@ if __name__ == "__main__":
         ct = xdmf.read_meshtags(mesh, name="mesh_tags")
 
     # Refine parent mesh within ventricles
-    refine_cells = ct.indices[np.isin(ct.values, subdomain_map["V34"])]
-    mesh.topology.create_connectivity(mesh.topology.dim, 1)
-    edges = dolfinx.mesh.compute_incident_entities(
-        mesh.topology, refine_cells, mesh.topology.dim, 1
-    )
-    partitioner = dolfinx.cpp.mesh.create_cell_partitioner(
-        dolfinx.mesh.GhostMode.shared_facet
-    )
     for i in range(2):
+        refine_cells = ct.indices[np.isin(ct.values, subdomain_map["V34"])]
+        mesh.topology.create_connectivity(mesh.topology.dim, 1)
+        edges = dolfinx.mesh.compute_incident_entities(
+            mesh.topology, refine_cells, mesh.topology.dim, 1
+        )
         refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
             mesh,
             edges,
