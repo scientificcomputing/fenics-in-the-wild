@@ -436,7 +436,12 @@ if __name__ == "__main__":
     num_refinements = 1
     for i in range(num_refinements):
         refine_cells = ct.indices[
-            np.isin(ct.values, np.asarray(subdomain_map["V34"] + subdomain_map["LV"]))
+            np.isin(
+                ct.values,
+                np.asarray(
+                    subdomain_map["V34"] + subdomain_map["LV"] + subdomain_map["SAS"]
+                ),
+            )
         ]
         mesh.topology.create_connectivity(mesh.topology.dim, 1)
         edges = dolfinx.mesh.compute_incident_entities(
@@ -457,7 +462,6 @@ if __name__ == "__main__":
         xdmf.write_meshtags(refined_ct, refined_mesh.geometry)
 
     refined_mesh.comm.Barrier()
-
     with dolfinx.io.XDMFFile(refined_mesh.comm, "refined.xdmf", "r") as xdmf:
         refined_mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.shared_facet)
         refined_ct = xdmf.read_meshtags(refined_mesh, name="mesh_tags")
@@ -543,7 +547,8 @@ if __name__ == "__main__":
         interface_marker,
         subdomain_map,
         interface_map,
-        u_in=1e-9,
+        mu=0.7e-3,
+        u_in=4.63e-9,
         R0=1e4,
         degree=2,
     )
