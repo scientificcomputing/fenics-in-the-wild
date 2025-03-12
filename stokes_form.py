@@ -433,7 +433,8 @@ if __name__ == "__main__":
         ct = xdmf.read_meshtags(mesh, name="mesh_tags")
 
     # Refine parent mesh within ventricles
-    for i in range(2):
+    num_refinements = 1
+    for i in range(num_refinements):
         refine_cells = ct.indices[
             np.isin(ct.values, np.asarray(subdomain_map["V34"] + subdomain_map["LV"]))
         ]
