@@ -433,14 +433,16 @@ if __name__ == "__main__":
     partitioner = dolfinx.cpp.mesh.create_cell_partitioner(
         dolfinx.mesh.GhostMode.shared_facet
     )
-
-    refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
-        mesh,
-        edges,
-        partitioner=None,
-        option=dolfinx.mesh.RefinementOption.parent_cell,
-    )
-    refined_ct = dolfinx.mesh.transfer_meshtag(ct, refined_mesh, parent_cell)
+    for i in range(2):
+        refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
+            mesh,
+            edges,
+            partitioner=None,
+            option=dolfinx.mesh.RefinementOption.parent_cell,
+        )
+        refined_ct = dolfinx.mesh.transfer_meshtag(ct, refined_mesh, parent_cell)
+        mesh = refined_mesh
+        ct = refined_ct
 
     with dolfinx.io.XDMFFile(refined_mesh.comm, "refined.xdmf", "w") as xdmf:
         xdmf.write_mesh(refined_mesh)
