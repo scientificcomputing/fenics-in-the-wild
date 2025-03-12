@@ -169,7 +169,7 @@ def tangent_projection(u, n):
     return u - ufl.dot(u, n) * n
 
 
-def create_inflow_function(
+def strong_bc_bdm_function(
     Q: dolfinx.fem.FunctionSpace,
     expr: ufl.core.expr.Expr,
     facets: npt.NDArray[np.int32],
@@ -295,7 +295,7 @@ def stokes_solver(
     inflow_facets = facet_markers.indices[
         np.isin(facet_markers.values, facet_map["LV_PAR"])
     ]
-    u_bc = create_inflow_function(
+    u_bc = strong_bc_bdm_function(
         V,
         inlet_expr,
         inflow_facets,
@@ -311,7 +311,7 @@ def stokes_solver(
             [facet_map["V34_PAR"], facet_map["PAR_SAS"], facet_map["AM_L"]],
         )
     ]
-    u_wall = create_inflow_function(V, dolfinx.fem.Constant(mesh, 0.0) * n, walls)
+    u_wall = strong_bc_bdm_function(V, dolfinx.fem.Constant(mesh, 0.0) * n, walls)
     wall_dofs = dolfinx.fem.locate_dofs_topological(
         (W.sub(0), V), mesh.topology.dim - 1, walls
     )
@@ -337,6 +337,7 @@ def stokes_solver(
         facet_map["V34_PAR"],
         facet_map["PAR_SAS"],
         facet_map["AM_L"],
+        facet_map["LV_PAR"],
     )
     a += (
         -ufl.inner(ufl.dot(mu_c * ufl.grad(v), n), tangent_projection(u, n))
@@ -390,8 +391,11 @@ def stokes_solver(
     petsc_options = {
         "ksp_type": "preonly",
         "pc_type": "lu",
-        "pc_factor_mat_solver_type": "mumps",
         "ksp_error_if_not_converged": True,
+        "pc_factor_mat_solver_type": "mumps",
+        "mat_mumps_icntl_14": 100,
+        # "mat_mumps_icntl_24": 1,
+        # "mat_mumps_icntl_25": 1,
     }
     problem = dolfinx.fem.petsc.LinearProblem(
         a, L, bcs=bcs, petsc_options=petsc_options, jit_options=jit_options
@@ -416,112 +420,113 @@ interface_map = {
 
 
 if __name__ == "__main__":
-    # with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "test_marius.xdmf", "r") as xdmf:
-    #     mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.none)
-    #     ct = xdmf.read_meshtags(mesh, name="mesh_tags")
+    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "test_marius.xdmf", "r") as xdmf:
+        mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.none)
+        ct = xdmf.read_meshtags(mesh, name="mesh_tags")
 
-    # # Refine parent mesh within ventricles
-    # refine_cells = ct.indices[np.isin(ct.values, subdomain_map["V34"])]
-    # mesh.topology.create_connectivity(mesh.topology.dim, 1)
-    # edges = dolfinx.mesh.compute_incident_entities(
-    #     mesh.topology, refine_cells, mesh.topology.dim, 1
+    # Refine parent mesh within ventricles
+    refine_cells = ct.indices[np.isin(ct.values, subdomain_map["V34"])]
+    mesh.topology.create_connectivity(mesh.topology.dim, 1)
+    edges = dolfinx.mesh.compute_incident_entities(
+        mesh.topology, refine_cells, mesh.topology.dim, 1
+    )
+    partitioner = dolfinx.cpp.mesh.create_cell_partitioner(
+        dolfinx.mesh.GhostMode.shared_facet
+    )
+
+    refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
+        mesh,
+        edges,
+        partitioner=None,
+        option=dolfinx.mesh.RefinementOption.parent_cell,
+    )
+    refined_ct = dolfinx.mesh.transfer_meshtag(ct, refined_mesh, parent_cell)
+
+    with dolfinx.io.XDMFFile(refined_mesh.comm, "refined.xdmf", "w") as xdmf:
+        xdmf.write_mesh(refined_mesh)
+        xdmf.write_meshtags(refined_ct, refined_mesh.geometry)
+
+    refined_mesh.comm.Barrier()
+
+    with dolfinx.io.XDMFFile(refined_mesh.comm, "refined.xdmf", "r") as xdmf:
+        refined_mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.shared_facet)
+        refined_ct = xdmf.read_meshtags(refined_mesh, name="mesh_tags")
+
+    def upper_skull(x, upper_skull_z=0.027):
+        return x[2] - 0.8 * x[1] > upper_skull_z
+
+    parent_ft = define_subdomain_markers(
+        refined_mesh, refined_ct, subdomain_map, interface_map, upper_skull
+    )
+
+    csf_mesh, cell_map, vertex_map, node_map, csf_markers = extract_submesh(
+        refined_mesh, refined_ct, (1, 3, 4)
+    )
+
+    interface_marker, _ = scifem.transfer_meshtags_to_submesh(
+        parent_ft, csf_mesh, vertex_map, cell_map
+    )
+    interface_marker.name = "interfaces"
+    with dolfinx.io.XDMFFile(csf_mesh.comm, "csf.xdmf", "w") as xdmf:
+        xdmf.write_mesh(csf_mesh)
+        xdmf.write_meshtags(csf_markers, csf_mesh.geometry)
+        csf_mesh.topology.create_connectivity(
+            csf_mesh.topology.dim - 1, csf_mesh.topology.dim
+        )
+        xdmf.write_meshtags(interface_marker, csf_mesh.geometry)
+
+    # --------------------- SIMPLE test setup ----------------------
+    # N = 10
+    # csf_mesh = dolfinx.mesh.create_unit_cube(
+    #     MPI.COMM_WORLD,
+    #     N,
+    #     N,
+    #     N,
+    #     dolfinx.cpp.mesh.CellType.tetrahedron,
+    #     ghost_mode=dolfinx.mesh.GhostMode.shared_facet,
     # )
-    # partitioner = dolfinx.cpp.mesh.create_cell_partitioner(
-    #     dolfinx.mesh.GhostMode.shared_facet
+    # cell_map = csf_mesh.topology.index_map(csf_mesh.topology.dim)
+    # num_cells = cell_map.size_local + cell_map.num_ghosts
+    # csf_markers = dolfinx.mesh.meshtags(
+    #     csf_mesh,
+    #     csf_mesh.topology.dim,
+    #     np.arange(num_cells, dtype=np.int32),
+    #     np.full(num_cells, subdomain_map["SAS"], dtype=np.int32),
     # )
 
-    # refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
-    #     mesh,
-    #     edges,
-    #     partitioner=None,
-    #     option=dolfinx.mesh.RefinementOption.parent_cell,
+    # csf_mesh.topology.create_connectivity(
+    #     csf_mesh.topology.dim - 1, csf_mesh.topology.dim
     # )
-    # refined_ct = dolfinx.mesh.transfer_meshtag(ct, refined_mesh, parent_cell)
+    # facet_map = csf_mesh.topology.index_map(csf_mesh.topology.dim - 1)
+    # num_facets = facet_map.size_local + facet_map.num_ghosts
+    # values = np.full(num_facets, -1, dtype=np.int32)
 
-    # with dolfinx.io.XDMFFile(refined_mesh.comm, "refined.xdmf", "w") as xdmf:
-    #     xdmf.write_mesh(refined_mesh)
-    #     xdmf.write_meshtags(refined_ct, refined_mesh.geometry)
-
-    # refined_mesh.comm.Barrier()
-
-    # with dolfinx.io.XDMFFile(refined_mesh.comm, "refined.xdmf", "r") as xdmf:
-    #     refined_mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.shared_facet)
-    #     refined_ct = xdmf.read_meshtags(refined_mesh, name="mesh_tags")
-
-    # def upper_skull(x, upper_skull_z=0.027):
-    #     return x[2] - 0.8 * x[1] > upper_skull_z
-
-    # parent_ft = define_subdomain_markers(
-    #     refined_mesh, refined_ct, subdomain_map, interface_map, upper_skull
+    # tb = dolfinx.mesh.locate_entities_boundary(
+    #     csf_mesh,
+    #     csf_mesh.topology.dim - 1,
+    #     lambda x: np.isclose(x[1], 0)
+    #     | np.isclose(x[1], 1)
+    #     | np.isclose(x[2], 1)
+    #     | np.isclose(x[2], 0),
     # )
-
-    # csf_mesh, cell_map, vertex_map, node_map, csf_markers = extract_submesh(
-    #     refined_mesh, refined_ct, (1, 3, 4)
+    # values[tb] = interface_map["PAR_SAS"]
+    # lft = dolfinx.mesh.locate_entities_boundary(
+    #     csf_mesh,
+    #     csf_mesh.topology.dim - 1,
+    #     lambda x: np.isclose(x[0], 1),
     # )
-
-    # interface_marker, _ = scifem.transfer_meshtags_to_submesh(
-    #     parent_ft, csf_mesh, vertex_map, cell_map
+    # values[lft] = interface_map["AM_U"]
+    # rft = dolfinx.mesh.locate_entities_boundary(
+    #     csf_mesh,
+    #     csf_mesh.topology.dim - 1,
+    #     lambda x: np.isclose(x[0], 0),
     # )
-    # interface_marker.name = "interfaces"
-    # with dolfinx.io.XDMFFile(csf_mesh.comm, "csf.xdmf", "w") as xdmf:
-    #     xdmf.write_mesh(csf_mesh)
-    #     xdmf.write_meshtags(csf_markers, csf_mesh.geometry)
-    #     csf_mesh.topology.create_connectivity(
-    #         csf_mesh.topology.dim - 1, csf_mesh.topology.dim
-    #     )
-    #     xdmf.write_meshtags(interface_marker, csf_mesh.geometry)
-
-    N = 10
-    csf_mesh = dolfinx.mesh.create_unit_cube(
-        MPI.COMM_WORLD,
-        N,
-        N,
-        N,
-        dolfinx.cpp.mesh.CellType.tetrahedron,
-        ghost_mode=dolfinx.mesh.GhostMode.shared_facet,
-    )
-    cell_map = csf_mesh.topology.index_map(csf_mesh.topology.dim)
-    num_cells = cell_map.size_local + cell_map.num_ghosts
-    csf_markers = dolfinx.mesh.meshtags(
-        csf_mesh,
-        csf_mesh.topology.dim,
-        np.arange(num_cells, dtype=np.int32),
-        np.full(num_cells, subdomain_map["SAS"], dtype=np.int32),
-    )
-
-    csf_mesh.topology.create_connectivity(
-        csf_mesh.topology.dim - 1, csf_mesh.topology.dim
-    )
-    facet_map = csf_mesh.topology.index_map(csf_mesh.topology.dim - 1)
-    num_facets = facet_map.size_local + facet_map.num_ghosts
-    values = np.full(num_facets, -1, dtype=np.int32)
-
-    tb = dolfinx.mesh.locate_entities_boundary(
-        csf_mesh,
-        csf_mesh.topology.dim - 1,
-        lambda x: np.isclose(x[1], 0)
-        | np.isclose(x[1], 1)
-        | np.isclose(x[2], 1)
-        | np.isclose(x[2], 0),
-    )
-    values[tb] = interface_map["PAR_SAS"]
-    lft = dolfinx.mesh.locate_entities_boundary(
-        csf_mesh,
-        csf_mesh.topology.dim - 1,
-        lambda x: np.isclose(x[0], 1),
-    )
-    values[lft] = interface_map["AM_U"]
-    rft = dolfinx.mesh.locate_entities_boundary(
-        csf_mesh,
-        csf_mesh.topology.dim - 1,
-        lambda x: np.isclose(x[0], 0),
-    )
-    values[rft] = interface_map["LV_PAR"]
-    indices = np.flatnonzero(values >= 0)
-    values = values[indices]
-    interface_marker = dolfinx.mesh.meshtags(
-        csf_mesh, csf_mesh.topology.dim - 1, indices, values
-    )
+    # values[rft] = interface_map["LV_PAR"]
+    # indices = np.flatnonzero(values >= 0)
+    # values = values[indices]
+    # interface_marker = dolfinx.mesh.meshtags(
+    #     csf_mesh, csf_mesh.topology.dim - 1, indices, values
+    # )
     uh, ph = stokes_solver(
         csf_mesh,
         csf_markers,
