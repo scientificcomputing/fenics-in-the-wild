@@ -5,7 +5,9 @@ import numpy as np
 import ufl
 import typing
 import basix.ufl
+import adios4dolfinx
 import numpy.typing as npt
+from pathlib import Path
 from packaging.version import Version
 import dolfinx.fem.petsc
 from time import perf_counter
@@ -404,6 +406,7 @@ def stokes_solver(
         "pc_factor_mat_solver_type": "mumps",
         "mat_mumps_icntl_14": 100,
         "mat_mumps_icntl_24": 1,
+        "mat_mumps_icntl_4": 2
         # "mat_mumps_icntl_25": 1,
     }
     problem = dolfinx.fem.petsc.LinearProblem(
@@ -600,8 +603,24 @@ if __name__ == "__main__":
         degree=degree,
     )
 
+    # For visualization of fluid flow within fluid cavities
     V_out = dolfinx.fem.functionspace(csf_mesh, ("DG", degree, (csf_mesh.geometry.dim,)))
     u_out = dolfinx.fem.Function(V_out, name="Velocity")
     u_out.interpolate(uh)
     with dolfinx.io.VTXWriter(csf_mesh.comm, "uh.bp", [u_out], engine="BP4") as bp:
         bp.write(0.0)
+
+    # Map solution back onto the parent grid
+    child_cells = np.arange(len(cell_map), dtype=np.int32)
+    V_full = dolfinx.fem.functionspace(refined_mesh, uh.function_space.ufl_element())
+    u_full = dolfinx.fem.Function(V_full, name="u")
+    u_full.interpolate(uh,cells0=child_cells, cells1=cell_map)
+
+    # Store solution and tags in checkpoint
+    checkpoint_file = Path("checkpoint.bp") 
+    adios4dolfinx.write_mesh(checkpoint_file, refined_mesh)
+    adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, refined_ct)
+    adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, parent_ft)
+    adios4dolfinx.write_function(checkpoint_file, u_full)
+    adios4dolfinx.write_attributes(checkpoint_file,refined_mesh.comm, "cell_map", subdomain_map)
+    adios4dolfinx.write_attributes(checkpoint_file,refined_mesh.comm, "facet_map", interface_map)
