@@ -29,3 +29,10 @@ CSF
 ```
 
 ## Finite element methods
+
+```{glossary}
+PDE
+    Partial differential equations
+FEM
+    Finite element method
+```

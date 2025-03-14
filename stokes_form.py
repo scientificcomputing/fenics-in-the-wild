@@ -16,7 +16,26 @@ subdomains = typing.Literal["SAS", "LV", "V34"]
 interfaces = typing.Literal["LV_PAR", "V34_PAR", "AM_U", "AM_L", "EXTERNAL"]
 
 
-def extract_submesh(mesh, entity_tag, tags: tuple[int, ...]):
+def extract_submesh(
+    mesh: dolfinx.mesh.Mesh, entity_tag: dolfinx.mesh.MeshTags, tags: tuple[int, ...]
+) -> tuple[
+    dolfinx.mesh.Mesh,
+    npt.NDArray[np.int32],
+    npt.NDArray[np.int32],
+    npt.NDArray[np.int32],
+    dolfinx.mesh.MeshTags,
+]:
+    """Generate a sub-mesh from a subset of tags in a meshtag/
+
+    Args:
+        mesh: The mesh to extract the submesh from.
+        entity_tag: MeshTags object containing marked entities.
+        tags: What tags the marked entities used in the submesh should have.
+
+    Returns:
+        A tuple `(submesh, subcell_to_parent_entity, subvertex_to_parent_vertex,
+        subnode_to_parent_node, entity_tag_on_submesh)`.
+    """
     edim = entity_tag.dim
     mesh.topology.create_connectivity(edim, mesh.topology.dim)
     emap = mesh.topology.index_map(entity_tag.dim)
@@ -39,58 +58,73 @@ def extract_submesh(mesh, entity_tag, tags: tuple[int, ...]):
     return submesh, cell_map, vertex_map, node_map, new_et
 
 
-def interface(mesh, cell_tags, id_0, id_1):
+def reverse_mark_entities(
+    entity_map: dolfinx.common.IndexMap, entities: npt.NDArray[np.int32]
+) -> npt.NDArray[np.int32]:
+    """Communicate entities marked on a single process to all processes that ghosts or owns this entity.
+
+    Args:
+        entity_map: Index-map describing entity ownership
+        entities: Local indices of entities to communicate
+    Returns:
+        Local indices marked on any process sharing this entity
+    """
+    comm_vec = dolfinx.la.vector(entity_map, dtype=np.int32)
+    comm_vec.array[:] = 0
+    comm_vec.array[entities] = 1
+    comm_vec.scatter_reverse(dolfinx.la.InsertMode.add)
+    comm_vec.scatter_forward()
+    return np.flatnonzero(comm_vec.array).astype(np.int32)
+
+
+def interface(
+    mesh: dolfinx.mesh.Mesh,
+    cell_tags: dolfinx.mesh.MeshTags,
+    id_0: tuple[int, ...],
+    id_1: tuple[int, ...],
+) -> npt.NDArray[np.int32]:
     """Given to sets of cells, find the facets that are shared between them.
 
     Args:
-        mesh: _description_
-        cell_tags: _description_
-        id_0: _description_
-        id_1: _description_
+        mesh: Mesh containing the cells
+        cell_tags: MeshTags object marking cells
+        id_0: Tags to extract for domain 0
+        id_1: Tags to extract for domain 1
 
     Returns:
-        _description_
+        The facets shared between the two domains.
     """
     assert mesh.topology.dim == cell_tags.dim
-    cell_map = mesh.topology.index_map(cell_tags.dim)
+    tdim = mesh.topology.dim
+    cell_map = mesh.topology.index_map(tdim)
 
     # Find all cells on process that has cell with tag(s) id_0
-    marker0 = dolfinx.la.vector(cell_map)
-    marker0.array[:] = 0
-    marker0.array[cell_tags.indices[np.isin(cell_tags.values, id_0)]] = 1
-    marker0.scatter_reverse(dolfinx.la.InsertMode.add)
-    marker0.scatter_forward()
+    domain_0 = reverse_mark_entities(
+        cell_map, cell_tags.indices[np.isin(cell_tags.values, id_0)]
+    )
 
     # Find all cells on process that has cell with tag(s) id_1
-    marker1 = dolfinx.la.vector(cell_map)
-    marker1.array[:] = 0
-    marker1.array[cell_tags.indices[np.isin(cell_tags.values, id_1)]] = 1
-    marker1.scatter_reverse(dolfinx.la.InsertMode.add)
-    marker1.scatter_forward()
+    domain_1 = reverse_mark_entities(
+        cell_map, cell_tags.indices[np.isin(cell_tags.values, id_1)]
+    )
 
     # Find all facets connected to each domain
-    mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
-    facets0 = dolfinx.mesh.compute_incident_entities(
-        mesh.topology,
-        np.flatnonzero(marker0.array),
-        cell_tags.dim,
-        cell_tags.dim - 1,
+    mesh.topology.create_connectivity(tdim, tdim - 1)
+    facet_map = mesh.topology.index_map(tdim - 1)
+
+    local_facets0 = dolfinx.mesh.compute_incident_entities(
+        mesh.topology, domain_0, tdim, tdim - 1
     )
-    facets1 = dolfinx.mesh.compute_incident_entities(
-        mesh.topology,
-        np.flatnonzero(marker1.array),
-        cell_tags.dim,
-        cell_tags.dim - 1,
+    facets0 = reverse_mark_entities(facet_map, local_facets0)
+
+    local_facets1 = dolfinx.mesh.compute_incident_entities(
+        mesh.topology, domain_1, tdim, tdim - 1
     )
+    facets1 = reverse_mark_entities(facet_map, local_facets1)
 
     # Compute intersecting facets
-    facet_map = mesh.topology.index_map(mesh.topology.dim - 1)
-    facet_marker = dolfinx.la.vector(facet_map)
-    facet_marker.array[:] = 0.0
-    facet_marker.array[np.intersect1d(facets0, facets1)] = 1
-    facet_marker.scatter_reverse(dolfinx.la.InsertMode.add)
-    facet_marker.scatter_forward()
-    return np.flatnonzero(facet_marker.array)
+    interface_facets = np.intersect1d(facets0, facets1)
+    return reverse_mark_entities(facet_map, interface_facets)
 
 
 def define_subdomain_markers(
@@ -277,7 +311,7 @@ def stokes_solver(
     element_p = basix.ufl.element(
         basix.ElementFamily.P,
         mesh.basix_cell(),
-        degree=degree-1,
+        degree=degree - 1,
         discontinuous=True,
     )
     me = basix.ufl.mixed_element([element_u, element_p])
@@ -406,7 +440,7 @@ def stokes_solver(
         "pc_factor_mat_solver_type": "mumps",
         "mat_mumps_icntl_14": 100,
         "mat_mumps_icntl_24": 1,
-        "mat_mumps_icntl_4": 2
+        "mat_mumps_icntl_4": 2,
         # "mat_mumps_icntl_25": 1,
     }
     problem = dolfinx.fem.petsc.LinearProblem(
@@ -416,7 +450,7 @@ def stokes_solver(
     wh = problem.solve()
     toc = perf_counter()
     if mesh.comm.rank == 0:
-        print(f"Solving took: {toc-tic:.2e} seconds")
+        print(f"Solving took: {toc - tic:.2e} seconds")
     return wh.sub(0).collapse(), wh.sub(1).collapse()
 
 
@@ -435,6 +469,41 @@ interface_map = {
 }
 
 
+def compute_subdomain_exterior_cells(
+    mesh: dolfinx.mesh.Mesh, ct: dolfinx.mesh.MeshTags, markers: tuple[int, ...]
+):
+    """Compute the exterior boundary of a set of subdomains.
+
+    Args:
+        mesh: Mesh to extract subdomains from
+        ct: MeshTags object marking subdomains
+        markers: The tags making up the "new" mesh
+    Returns:
+        Cells which has a facet on the exterior boundary of the subdomains.
+    """
+
+    sub_mesh, cell_map, _, _, _ = extract_submesh(
+        mesh,
+        ct,
+        fluid_domains,
+    )
+    sub_mesh.topology.create_connectivity(
+        sub_mesh.topology.dim - 1, sub_mesh.topology.dim
+    )
+    sub_fmap = sub_mesh.topology.index_map(sub_mesh.topology.dim - 1)
+    sub_exterior_facets = reverse_mark_entities(
+        sub_fmap, dolfinx.mesh.exterior_facet_indices(sub_mesh.topology)
+    )
+    sub_cells = dolfinx.mesh.compute_incident_entities(
+        sub_mesh.topology,
+        sub_exterior_facets,
+        sub_mesh.topology.dim - 1,
+        sub_mesh.topology.dim,
+    )
+    sub_cell_map = sub_mesh.topology.index_map(sub_mesh.topology.dim)
+    return cell_map[reverse_mark_entities(sub_cell_map, sub_cells)]
+
+
 if __name__ == "__main__":
     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "test_marius.xdmf", "r") as xdmf:
         mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.none)
@@ -444,6 +513,9 @@ if __name__ == "__main__":
 
     # Refine parent mesh within ventricles
     num_refinements = 2
+    if num_refinements == 0:
+        refined_mesh = mesh
+        refined_ct = ct
     for i in range(num_refinements):
         # Refine parent mesh within ventricles
         refine_cells = ct.indices[
@@ -453,47 +525,35 @@ if __name__ == "__main__":
             )
         ]
 
-        # Find all cells that are on the "boundary" of the fluid mesh. Currently, as ghost mode doesn't
-        # work with refinement, we do this through a submesh creation, similar to the one below.
-        tmp_mesh, cell_map, vertex_map, node_map, csf_markers = extract_submesh(
-            mesh,
-            ct,
-            fluid_domains,
-        )
-        tmp_mesh.topology.create_connectivity(
-            tmp_mesh.topology.dim - 1, tmp_mesh.topology.dim
-        )
-        tmp_exterior_facets = dolfinx.mesh.exterior_facet_indices(tmp_mesh.topology)
-        tmp_cells = dolfinx.mesh.compute_incident_entities(
-            tmp_mesh.topology,
-            tmp_exterior_facets,
-            tmp_mesh.topology.dim - 1,
-            tmp_mesh.topology.dim,
-        )
-        left_ventricle_boundary_cells = cell_map[tmp_cells]
-        del tmp_mesh, tmp_cells, tmp_exterior_facets, cell_map, vertex_map, node_map, csf_markers
-
         # Find all cells associated with outer boundary (dura) and refine the cells they correspond to
         mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
-        exterior_facet_indices = dolfinx.mesh.exterior_facet_indices(mesh.topology)
+        fmap = mesh.topology.index_map(mesh.topology.dim - 1)
+        exterior_facet_indices = reverse_mark_entities(
+            fmap, dolfinx.mesh.exterior_facet_indices(mesh.topology)
+        )
         boundary_cells = dolfinx.mesh.compute_incident_entities(
             mesh.topology,
             exterior_facet_indices,
             mesh.topology.dim - 1,
             mesh.topology.dim,
         )
+
+        fluid_boundary_cells = compute_subdomain_exterior_cells(mesh, ct, fluid_domains)
+
         # For any further refinement, only refine the boundary of the fluid domains, not the interior
-        if i <1:
-            cell_to_refine = np.unique(
-                np.hstack([boundary_cells, left_ventricle_boundary_cells, refine_cells])
+        if i < 1:
+            cells_to_refine = np.unique(
+                np.hstack([boundary_cells, fluid_boundary_cells, refine_cells])
             ).astype(np.int32)
 
         else:
-            cells_to_refine=left_ventricle_boundary_cells
+            cells_to_refine = fluid_boundary_cells
 
         edges_to_refine = dolfinx.mesh.compute_incident_entities(
-            mesh.topology, cell_to_refine, mesh.topology.dim, 1
+            mesh.topology, cells_to_refine, mesh.topology.dim, 1
         )
+        edge_map = mesh.topology.index_map(1)
+        edges_to_refine = reverse_mark_entities(edge_map, edges_to_refine)
         refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
             mesh,
             edges_to_refine,
@@ -504,21 +564,28 @@ if __name__ == "__main__":
         mesh = refined_mesh
         ct = refined_ct
 
-    with dolfinx.io.XDMFFile(refined_mesh.comm, "refined.xdmf", "w") as xdmf:
-        xdmf.write_mesh(refined_mesh)
-        xdmf.write_meshtags(refined_ct, refined_mesh.geometry)
-
-    refined_mesh.comm.Barrier()
-    with dolfinx.io.XDMFFile(refined_mesh.comm, "refined.xdmf", "r") as xdmf:
-        refined_mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.shared_facet)
-        refined_ct = xdmf.read_meshtags(refined_mesh, name="mesh_tags")
-
     def upper_skull(x, upper_skull_z=0.027):
         return x[2] - 0.8 * x[1] > upper_skull_z
 
     parent_ft = define_subdomain_markers(
         refined_mesh, refined_ct, subdomain_map, interface_map, upper_skull
     )
+    parent_ft.name = "interfaces_and_boundaries"
+    comm = refined_mesh.comm
+    with dolfinx.io.XDMFFile(comm, "refined.xdmf", "w") as xdmf:
+        xdmf.write_mesh(refined_mesh)
+        xdmf.write_meshtags(refined_ct, refined_mesh.geometry)
+        xdmf.write_meshtags(parent_ft, refined_mesh.geometry)
+    del refined_ct, parent_ft, refined_mesh
+    comm.Barrier()
+
+    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "refined.xdmf", "r") as xdmf:
+        refined_mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.shared_facet)
+        refined_ct = xdmf.read_meshtags(refined_mesh, name="mesh_tags")
+        refined_mesh.topology.create_connectivity(
+            refined_mesh.topology.dim - 1, refined_mesh.topology.dim
+        )
+        refined_ft = xdmf.read_meshtags(refined_mesh, name="interfaces_and_boundaries")
 
     csf_mesh, cell_map, vertex_map, node_map, csf_markers = extract_submesh(
         refined_mesh,
@@ -527,7 +594,7 @@ if __name__ == "__main__":
     )
 
     interface_marker, _ = scifem.transfer_meshtags_to_submesh(
-        parent_ft, csf_mesh, vertex_map, cell_map
+        refined_ft, csf_mesh, vertex_map, cell_map
     )
     interface_marker.name = "interfaces"
     with dolfinx.io.XDMFFile(csf_mesh.comm, "csf.xdmf", "w") as xdmf:
@@ -604,7 +671,9 @@ if __name__ == "__main__":
     )
 
     # For visualization of fluid flow within fluid cavities
-    V_out = dolfinx.fem.functionspace(csf_mesh, ("DG", degree, (csf_mesh.geometry.dim,)))
+    V_out = dolfinx.fem.functionspace(
+        csf_mesh, ("DG", degree, (csf_mesh.geometry.dim,))
+    )
     u_out = dolfinx.fem.Function(V_out, name="Velocity")
     u_out.interpolate(uh)
     with dolfinx.io.VTXWriter(csf_mesh.comm, "uh.bp", [u_out], engine="BP4") as bp:
@@ -614,13 +683,17 @@ if __name__ == "__main__":
     child_cells = np.arange(len(cell_map), dtype=np.int32)
     V_full = dolfinx.fem.functionspace(refined_mesh, uh.function_space.ufl_element())
     u_full = dolfinx.fem.Function(V_full, name="u")
-    u_full.interpolate(uh,cells0=child_cells, cells1=cell_map)
+    u_full.interpolate(uh, cells0=child_cells, cells1=cell_map)
 
     # Store solution and tags in checkpoint
-    checkpoint_file = Path("checkpoint.bp") 
+    checkpoint_file = Path("checkpoint.bp")
     adios4dolfinx.write_mesh(checkpoint_file, refined_mesh)
     adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, refined_ct)
     adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, parent_ft)
     adios4dolfinx.write_function(checkpoint_file, u_full)
-    adios4dolfinx.write_attributes(checkpoint_file,refined_mesh.comm, "cell_map", subdomain_map)
-    adios4dolfinx.write_attributes(checkpoint_file,refined_mesh.comm, "facet_map", interface_map)
+    adios4dolfinx.write_attributes(
+        checkpoint_file, refined_mesh.comm, "cell_map", subdomain_map
+    )
+    adios4dolfinx.write_attributes(
+        checkpoint_file, refined_mesh.comm, "facet_map", interface_map
+    )

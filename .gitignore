@@ -164,3 +164,18 @@ cython_debug/
 
 .vscode/
 _build
+
+# Input/output file formats
+*.bp
+*.xdmf
+*.h5
+*.vtk
+*.vtu
+*.pvd
+*.pvtu
+*.nii*
+*.mgz
+*.tar.gz
+*.zip
+*.stl
+*.ply
