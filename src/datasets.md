@@ -1,6 +1,8 @@
-# Instructions for meshing of brains
+# Biomedical datasets
 
-There are several public data-sets for meshing
+There are several public data-sets for meshing:
+
+(mri2fem2-chapter2)=
 
 ## MRI to FEM Vol 2 - Chapter 2
 
@@ -47,6 +49,8 @@ An example of a config file for `wildmeshing` is:
 }
 ```
 
+(mri2fem2-chapter3)=
+
 ## MRI to FEM Vol 2 - Chapter 3
 
 The following dataset: [DOI: 10.5281/zenodo.10808333](https://doi.org/10.5281/zenodo.10808333)
@@ -87,6 +91,8 @@ An example of a config file for `wildmeshing` is:
   }
 }
 ```
+
+(data-from-the-paper-in-silico-molecular-enrichment-and-clearance-of-the-human-intracranial-space)=
 
 ## Data from the paper In-silico molecular enrichment and clearance of the human intracranial space
 

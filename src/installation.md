@@ -2,7 +2,7 @@
 
 This webpage uses several Python packages:
 
-- [FEniCS/DOLFINx](https://github.com/FEniCS/dolfinx/) - A software for modelling partial differential equations {term}`PDE` with the finite element method {term}`FEM`.
+- [FEniCS/DOLFINx](https://github.com/FEniCS/dolfinx/) - A software for modelling partial differential equations ({term}`PDE`) with the finite element method ({term}`FEM`).
 - [Scifem](https://github.com/scientificcomputing/scifem) - Convenience wrappers for on top of DOLFINx for scientific computing.
 - [Wildmeshing](https://github.com/wildmeshing/wildmeshing-python) - A mesh generation software.
 
@@ -21,7 +21,7 @@ python3 -m pip install scifem wildmeshing
 
 Create a conda enviroment based on the following `environment.yml` file:
 
-```yml
+```yaml
 name: fenicsinthewild
 channels:
   - conda-forge
@@ -47,4 +47,5 @@ variables:
   PYVISTA_OFF_SCREEN: false
   PYVISTA_JUPYTER_BACKEND: "html"
   LIBGL_ALWAYS_SOFTWARE: 1
+  OMP_NUM_THREADS: 1
 ```
