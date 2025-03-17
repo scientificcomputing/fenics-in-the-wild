@@ -547,7 +547,7 @@ if __name__ == "__main__":
             ).astype(np.int32)
 
         else:
-            cells_to_refine = fluid_boundary_cells
+            cells_to_refine = refine_cells
 
         edges_to_refine = dolfinx.mesh.compute_incident_entities(
             mesh.topology, cells_to_refine, mesh.topology.dim, 1
