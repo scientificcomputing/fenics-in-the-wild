@@ -689,7 +689,7 @@ if __name__ == "__main__":
     checkpoint_file = Path("checkpoint.bp")
     adios4dolfinx.write_mesh(checkpoint_file, refined_mesh)
     adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, refined_ct)
-    adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, parent_ft)
+    adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, refined_ft)
     adios4dolfinx.write_function(checkpoint_file, u_full)
     adios4dolfinx.write_attributes(
         checkpoint_file, refined_mesh.comm, "cell_map", subdomain_map
