@@ -16,117 +16,6 @@ subdomains = typing.Literal["SAS", "LV", "V34"]
 interfaces = typing.Literal["LV_PAR", "V34_PAR", "AM_U", "AM_L", "EXTERNAL"]
 
 
-def extract_submesh(
-    mesh: dolfinx.mesh.Mesh, entity_tag: dolfinx.mesh.MeshTags, tags: tuple[int, ...]
-) -> tuple[
-    dolfinx.mesh.Mesh,
-    npt.NDArray[np.int32],
-    npt.NDArray[np.int32],
-    npt.NDArray[np.int32],
-    dolfinx.mesh.MeshTags,
-]:
-    """Generate a sub-mesh from a subset of tags in a meshtag/
-
-    Args:
-        mesh: The mesh to extract the submesh from.
-        entity_tag: MeshTags object containing marked entities.
-        tags: What tags the marked entities used in the submesh should have.
-
-    Returns:
-        A tuple `(submesh, subcell_to_parent_entity, subvertex_to_parent_vertex,
-        subnode_to_parent_node, entity_tag_on_submesh)`.
-    """
-    edim = entity_tag.dim
-    mesh.topology.create_connectivity(edim, mesh.topology.dim)
-    emap = mesh.topology.index_map(entity_tag.dim)
-    marker = dolfinx.la.vector(emap)
-    for tag in tags:
-        marker.array[entity_tag.find(tag)] = 1
-    marker.scatter_reverse(dolfinx.la.InsertMode.add)
-    entities = np.flatnonzero(marker.array)
-
-    # Extract submesh
-    submesh, cell_map, vertex_map, node_map = dolfinx.mesh.create_submesh(
-        mesh, edim, entities
-    )
-
-    # Transfer cell markers
-    new_et, _ = scifem.transfer_meshtags_to_submesh(
-        entity_tag, submesh, vertex_map, cell_map
-    )
-    new_et.name = entity_tag.name
-    return submesh, cell_map, vertex_map, node_map, new_et
-
-
-def reverse_mark_entities(
-    entity_map: dolfinx.common.IndexMap, entities: npt.NDArray[np.int32]
-) -> npt.NDArray[np.int32]:
-    """Communicate entities marked on a single process to all processes that ghosts or owns this entity.
-
-    Args:
-        entity_map: Index-map describing entity ownership
-        entities: Local indices of entities to communicate
-    Returns:
-        Local indices marked on any process sharing this entity
-    """
-    comm_vec = dolfinx.la.vector(entity_map, dtype=np.int32)
-    comm_vec.array[:] = 0
-    comm_vec.array[entities] = 1
-    comm_vec.scatter_reverse(dolfinx.la.InsertMode.add)
-    comm_vec.scatter_forward()
-    return np.flatnonzero(comm_vec.array).astype(np.int32)
-
-
-def interface(
-    mesh: dolfinx.mesh.Mesh,
-    cell_tags: dolfinx.mesh.MeshTags,
-    id_0: tuple[int, ...],
-    id_1: tuple[int, ...],
-) -> npt.NDArray[np.int32]:
-    """Given to sets of cells, find the facets that are shared between them.
-
-    Args:
-        mesh: Mesh containing the cells
-        cell_tags: MeshTags object marking cells
-        id_0: Tags to extract for domain 0
-        id_1: Tags to extract for domain 1
-
-    Returns:
-        The facets shared between the two domains.
-    """
-    assert mesh.topology.dim == cell_tags.dim
-    tdim = mesh.topology.dim
-    cell_map = mesh.topology.index_map(tdim)
-
-    # Find all cells on process that has cell with tag(s) id_0
-    domain_0 = reverse_mark_entities(
-        cell_map, cell_tags.indices[np.isin(cell_tags.values, id_0)]
-    )
-
-    # Find all cells on process that has cell with tag(s) id_1
-    domain_1 = reverse_mark_entities(
-        cell_map, cell_tags.indices[np.isin(cell_tags.values, id_1)]
-    )
-
-    # Find all facets connected to each domain
-    mesh.topology.create_connectivity(tdim, tdim - 1)
-    facet_map = mesh.topology.index_map(tdim - 1)
-
-    local_facets0 = dolfinx.mesh.compute_incident_entities(
-        mesh.topology, domain_0, tdim, tdim - 1
-    )
-    facets0 = reverse_mark_entities(facet_map, local_facets0)
-
-    local_facets1 = dolfinx.mesh.compute_incident_entities(
-        mesh.topology, domain_1, tdim, tdim - 1
-    )
-    facets1 = reverse_mark_entities(facet_map, local_facets1)
-
-    # Compute intersecting facets
-    interface_facets = np.intersect1d(facets0, facets1)
-    return reverse_mark_entities(facet_map, interface_facets)
-
-
 def define_subdomain_markers(
     mesh: dolfinx.mesh.Mesh,
     cell_tags: dolfinx.mesh.MeshTags,
@@ -156,7 +45,12 @@ def define_subdomain_markers(
     """
     # Sanity check, LV should not touch SAS
     assert (
-        len(interface(mesh, cell_tags, subdomain_map["LV"], subdomain_map["SAS"])) == 0
+        len(
+            scifem.mesh.find_interface(
+                cell_tags, subdomain_map["LV"], subdomain_map["SAS"]
+            )
+        )
+        == 0
     )
     for m, val in interface_map.items():
         if val <= 0:
@@ -173,13 +67,15 @@ def define_subdomain_markers(
         mesh, mesh.topology.dim - 1, AM_U_function
     )
 
-    inflow_facets = interface(
-        mesh, cell_tags, subdomain_map["PAR"], subdomain_map["LV"]
+    inflow_facets = scifem.mesh.find_interface(
+        cell_tags, subdomain_map["PAR"], subdomain_map["LV"]
     )
-    v34_walls = interface(mesh, cell_tags, subdomain_map["PAR"], subdomain_map["V34"])
+    v34_walls = scifem.mesh.find_interface(
+        cell_tags, subdomain_map["PAR"], subdomain_map["V34"]
+    )
 
-    internal_walls = interface(
-        mesh, cell_tags, subdomain_map["PAR"], subdomain_map["SAS"]
+    internal_walls = scifem.mesh.find_interface(
+        cell_tags, subdomain_map["PAR"], subdomain_map["SAS"]
     )
 
     facet_marker[outer_parent_facets] = interface_map["AM_L"]
@@ -269,11 +165,16 @@ def strong_bc_bdm_function(
         (offsets[-1], domain.geometry.dim), dtype=dolfinx.default_scalar_type
     )
     entities = boundary_entities.reshape(-1, 2)
-
     values = np.zeros(entities.shape[0] * offsets[-1] * domain.geometry.dim)
     for i, entity in enumerate(entities):
         insert_pos = offsets[fdim] + reference_facet_points.shape[0] * entity[1]
-        normal_on_facet = normal_expr.eval(domain, entity)
+        # Backwards compatibility
+        try:
+            normal_on_facet = normal_expr.eval(domain, entity.reshape(1, 2))
+        except AttributeError:
+            normal_on_facet = normal_expr.eval(domain, entity)
+
+        # NOTE: evaluate within loop to avoid large memory requirements
         values_per_entity[insert_pos : insert_pos + reference_facet_points.shape[0]] = (
             normal_on_facet.reshape(-1, domain.geometry.dim)
         )
@@ -481,27 +382,25 @@ def compute_subdomain_exterior_cells(
     Returns:
         Cells which has a facet on the exterior boundary of the subdomains.
     """
-
-    sub_mesh, cell_map, _, _, _ = extract_submesh(
-        mesh,
-        ct,
-        fluid_domains,
+    # Find facets that are considered exterior
+    subdomain_exterior_facets = scifem.mesh.compute_subdomain_exterior_facets(
+        mesh, ct, markers
     )
-    sub_mesh.topology.create_connectivity(
-        sub_mesh.topology.dim - 1, sub_mesh.topology.dim
-    )
-    sub_fmap = sub_mesh.topology.index_map(sub_mesh.topology.dim - 1)
-    sub_exterior_facets = reverse_mark_entities(
-        sub_fmap, dolfinx.mesh.exterior_facet_indices(sub_mesh.topology)
-    )
+    tdim = mesh.topology.dim
+    assert ct.dim == tdim
     sub_cells = dolfinx.mesh.compute_incident_entities(
-        sub_mesh.topology,
-        sub_exterior_facets,
-        sub_mesh.topology.dim - 1,
-        sub_mesh.topology.dim,
+        mesh.topology,
+        subdomain_exterior_facets,
+        tdim - 1,
+        tdim,
     )
-    sub_cell_map = sub_mesh.topology.index_map(sub_mesh.topology.dim)
-    return cell_map[reverse_mark_entities(sub_cell_map, sub_cells)]
+    full_subdomain = ct.indices[
+        np.isin(ct.values, np.asarray(markers, dtype=ct.values.dtype))
+    ]
+    cell_map = mesh.topology.index_map(tdim)
+    return scifem.mesh.reverse_mark_entities(
+        cell_map, np.intersect1d(full_subdomain, sub_cells)
+    )
 
 
 if __name__ == "__main__":
@@ -528,7 +427,7 @@ if __name__ == "__main__":
         # Find all cells associated with outer boundary (dura) and refine the cells they correspond to
         mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
         fmap = mesh.topology.index_map(mesh.topology.dim - 1)
-        exterior_facet_indices = reverse_mark_entities(
+        exterior_facet_indices = scifem.mesh.reverse_mark_entities(
             fmap, dolfinx.mesh.exterior_facet_indices(mesh.topology)
         )
         boundary_cells = dolfinx.mesh.compute_incident_entities(
@@ -553,7 +452,7 @@ if __name__ == "__main__":
             mesh.topology, cells_to_refine, mesh.topology.dim, 1
         )
         edge_map = mesh.topology.index_map(1)
-        edges_to_refine = reverse_mark_entities(edge_map, edges_to_refine)
+        edges_to_refine = scifem.mesh.reverse_mark_entities(edge_map, edges_to_refine)
         refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
             mesh,
             edges_to_refine,
@@ -587,7 +486,7 @@ if __name__ == "__main__":
         )
         refined_ft = xdmf.read_meshtags(refined_mesh, name="interfaces_and_boundaries")
 
-    csf_mesh, cell_map, vertex_map, node_map, csf_markers = extract_submesh(
+    csf_mesh, cell_map, vertex_map, node_map, csf_markers = scifem.mesh.extract_submesh(
         refined_mesh,
         refined_ct,
         fluid_domains,
