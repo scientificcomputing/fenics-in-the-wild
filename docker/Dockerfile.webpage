@@ -20,6 +20,9 @@ WORKDIR /root/src
 COPY . .
 RUN python3 -m pip install .[dev]
 
+# RUN the mesh generation script to pre-store the mesh
+RUN jupyter execute src/generate_brain_mesh.ipynb
+
 ENV DISPLAY=:99
 CMD ["python3", "-m", "jupyter", "book", "build", "."] 
 ENTRYPOINT []
