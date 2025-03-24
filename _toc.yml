@@ -10,6 +10,7 @@ parts:
       - file: src/installation
       - file: src/datasets
       - file: src/generate_brain_mesh
+      - file: src/refinement_and_surface_markers
 
   - caption: "Use case 1"
     chapters:
