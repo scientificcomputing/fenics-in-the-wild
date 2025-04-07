@@ -42,10 +42,11 @@ Clone spack from its git repository (https://github.com/spack/spack)
 . ./spack/share/spack/setup-env.sh
 spack env create fenicsx-stable
 spack env activate fenicsx-stable
-spack add py-pip py-h5py py-scipy
+spack add py-pip py-h5py py-scipy py-pyvista
 spack add py-fenics-dolfinx fenics-dolfinx+adios2 ^adios2+python ^petsc+mumps+int64 cflags="-O3" fflags="-O3"
+spack add py-scikit-build-core py-nanobind
 spack install
-python3 -m pip install adios4dolfinx scifem
+python3 -m pip install adios4dolfinx wildmeshing git+https://github.com/scientificcomputing/scifem.git
 ```
 
 Currently one has to work around:
