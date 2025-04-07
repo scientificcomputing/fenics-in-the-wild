@@ -296,16 +296,16 @@ def stokes_solver(
         * ufl.inner(tangent_projection(u, n), tangent_projection(v, n))
         * ds(tangential_nonslip_markers)
     )
-    # Weak enforcement of tangential continuiuty
+    # Weak enforcement of tangential continuity
     dS = ufl.dS(domain=mesh)
-    a -= (
+    a += (
         -ufl.inner(
             ufl.dot(ufl.avg(mu * ufl.grad(u)), n("+")),
             ufl.jump(tangent_projection(v, n)),
         )
         * dS
     )
-    a -= (
+    a += (
         -ufl.inner(
             ufl.dot(ufl.avg(mu * ufl.grad(v)), n("+")),
             ufl.jump(tangent_projection(u, n)),

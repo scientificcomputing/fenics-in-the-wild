@@ -3,6 +3,7 @@
 ## Medical imaging
 
 ```{glossary}
+
 MRI
     Magnetic resonance imaging - A medical imaging technique using strong magnetic fields to generate images of organs.
 
@@ -20,6 +21,7 @@ CT
 ## Brain physiology
 
 ```{glossary}
+
 PVS
     Paravascular space - The fluid area surrounding arteries in the brain.
 
@@ -31,8 +33,10 @@ CSF
 ## Finite element methods
 
 ```{glossary}
+
 PDE
     Partial differential equations
+
 FEM
     Finite element method
 ```
