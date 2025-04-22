@@ -39,4 +39,7 @@ PDE
 
 FEM
     Finite element method
+
+UFL
+    The Unified Form Language: https://github.com/FEniCS/ufl/
 ```

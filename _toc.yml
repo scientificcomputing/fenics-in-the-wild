@@ -14,8 +14,7 @@ parts:
 
   - caption: "Use case 1"
     chapters:
-      - file: src/ucs/uc1
-        sections:
-          - file: src/ucs/uc1b
-          - file: src/ucs/uc1_variational_form
+      - file: src/ucs/uc1_diffusion
+      - file: src/ucs/uc1_flow
+      - file: src/ucs/uc1_flow_variational_form
       - file: src/glossary
