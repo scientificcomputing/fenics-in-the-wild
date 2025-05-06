@@ -40,7 +40,7 @@ def interior_marker(x, tol=1e-12):
 
 
 # Steps to set up submeshes and interface
-M = 100
+M = 200
 mesh = dolfinx.mesh.create_unit_square(
     MPI.COMM_WORLD, M, M, ghost_mode=dolfinx.mesh.GhostMode.shared_facet
 )
@@ -170,7 +170,7 @@ ui, ue = TrialFunctions(W)
 sigma_e = dolfinx.fem.Constant(omega_e, 2.0)
 sigma_i = dolfinx.fem.Constant(omega_i, 1.0)
 Cm = dolfinx.fem.Constant(mesh, 1.0)
-dt = dolfinx.fem.Constant(mesh, 1e-8)
+dt = dolfinx.fem.Constant(mesh, 1.e-2)
 
 # Setup variational form
 tr_ui = ui("+")
@@ -224,11 +224,22 @@ b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
 bcs0 = dolfinx.fem.bcs_by_block(dolfinx.fem.extract_function_spaces(L_compiled), [bc])
 dolfinx.fem.petsc.set_bc(b, bcs0)
 
+P = sigma_e * inner(grad(ue), grad(ve)) * dxE
+P += sigma_i * inner(grad(ui), grad(vi)) * dxI
+P += inner(ui, vi) * dxI
+P_compiled = dolfinx.fem.form(extract_blocks(P), entity_maps=entity_maps)
+bc_P = dolfinx.fem.dirichletbc(0.0, bc_dofs, Ve)
+B = dolfinx.fem.petsc.assemble_matrix(P_compiled, kind="mpi", bcs=[bc_P])
+B.assemble()
+
 ksp = PETSc.KSP().create(mesh.comm)
-ksp.setOperators(A)
-ksp.setType("preonly")
+ksp.setOperators(A, B)
+ksp.setType("cg")
 ksp.getPC().setType("lu")
 ksp.getPC().setFactorSolverType("mumps")
+ksp.setTolerances(1e-12, 1e-12)
+ksp.setMonitor(lambda ksp, its, rnorm: print(f"Iteration: {its}, residual: {rnorm}"))
+ksp.setNormType(PETSc.KSP.NormType.NORM_PRECONDITIONED)
 ksp.setErrorIfNotConverged(True)
 
 ui = dolfinx.fem.Function(Vi)
@@ -238,6 +249,9 @@ ksp.solve(b, x)
 x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
 dolfinx.fem.petsc.assign(x, [ui, ue])
 
+num_iterations = ksp.getIterationNumber()
+converged_reason = ksp.getConvergedReason()
+print(f"Solver converged in: {num_iterations} with reason {converged_reason}")
 
 with dolfinx.io.VTXWriter(omega_i.comm, "uh_i.bp", [ui], engine="BP5") as bp:
     bp.write(0.0)

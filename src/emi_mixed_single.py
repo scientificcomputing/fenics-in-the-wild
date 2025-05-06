@@ -42,7 +42,7 @@ def interior_marker(x, tol=1e-12):
 
 
 # Steps to set up submeshes and interface
-M = 100
+M = 200
 mesh = dolfinx.mesh.create_unit_square(
     MPI.COMM_WORLD, M, M, ghost_mode=dolfinx.mesh.GhostMode.shared_facet
 )
@@ -160,7 +160,7 @@ n = FacetNormal(mesh)
 n_i = n("+")
 n_e = n("-")
 a = inner(inv(sigma)*J, tau) * dx
-a += inv(T)*dt * dot(J("+"), n_i) * dot(tau("+"), n_i) * dGamma
+a += inv(T) * dot(J("+"), n_i) * dot(tau("+"), n_i) * dGamma
 a -= u * div(tau) * dx
 a -= q * div(J) * dx
 
@@ -183,6 +183,13 @@ L -= ue_exact * dot(tau, n) * ds
 a_compiled = dolfinx.fem.form(extract_blocks(a))
 L_compiled = dolfinx.fem.form(extract_blocks(L))
 
+P = inv(sigma)*inner(J, tau) * dx
+P += div(J)*div(tau) * dx
+P += inv(T) * dot(J("+"), n_i)*dot(tau("+"), n_i) * dGamma
+P += inner(u, q) * dx
+P_compiled = dolfinx.fem.form(extract_blocks(P))
+B = dolfinx.fem.petsc.assemble_matrix(P_compiled, kind="mpi")
+B.assemble()
 
 A = dolfinx.fem.petsc.assemble_matrix(a_compiled, kind="mpi", bcs=[])
 A.assemble()
@@ -196,11 +203,15 @@ b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
 # dolfinx.fem.petsc.set_bc(b, bcs0)
 
 ksp = PETSc.KSP().create(mesh.comm)
-ksp.setOperators(A)
-ksp.setType("preonly")
+ksp.setOperators(A, B)
+
+ksp.setType("minres")
 ksp.getPC().setType("lu")
 ksp.getPC().setFactorSolverType("mumps")
 ksp.setErrorIfNotConverged(True)
+ksp.setTolerances(1e-12, 1e-12)
+ksp.setMonitor(lambda ksp, its, rnorm: print(f"Iteration: {its}, residual: {rnorm}"))
+ksp.setNormType(PETSc.KSP.NormType.NORM_PRECONDITIONED)
 
 u = dolfinx.fem.Function(V)
 tau = dolfinx.fem.Function(S)
