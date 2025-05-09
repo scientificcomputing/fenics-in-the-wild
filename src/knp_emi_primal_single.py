@@ -9,25 +9,22 @@ from ufl import (
     TrialFunctions,
     FacetNormal,
     MixedFunctionSpace,
-    sin,
-    pi,
     extract_blocks,
     Measure,
-    SpatialCoordinate,
-    cos,
     div,
-    ln
+    dot
 )
 import numpy as np
 import numpy.typing as npt
 import scifem
 from packaging.version import Version
+from knp_emi_mms import ExactSolutionsKNPEMI
 
 x_L = 0.25
 x_U = 0.75
 y_L = 0.25
 y_U = 0.75
-
+MMS_VERIFICATION = True
 
 def interior_marker_function(x, tol=1e-12):
     lower_bound = lambda x, i, bound: x[i] >= bound - tol
@@ -67,7 +64,6 @@ omega_e, exterior_to_parent, e_vertex_to_parent, _, _ = scifem.mesh.extract_subm
     mesh, ct, exterior_marker
 )
 
-
 gamma = scifem.mesh.find_interface(ct, interior_marker, exterior_marker)
 
 mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
@@ -86,6 +82,11 @@ ft = dolfinx.mesh.meshtags(
 )
 ft.name = "interface_marker"
 
+sub_tag, _ = scifem.mesh.transfer_meshtags_to_submesh(
+    ft, omega_e, e_vertex_to_parent, exterior_to_parent
+)
+omega_e.topology.create_connectivity(omega_e.topology.dim - 1, omega_e.topology.dim)
+
 with dolfinx.io.XDMFFile(mesh.comm, "cell.xdmf", "w") as xdmf:
     xdmf.write_mesh(mesh)
     xdmf.write_meshtags(ft, mesh.geometry)
@@ -95,6 +96,8 @@ dx = Measure("dx", domain=mesh, subdomain_data=ct)
 dxI = dx(interior_marker)
 dxE = dx(exterior_marker)
 
+# Exterior facet integral measure
+ds = Measure("ds", domain=mesh, subdomain_data=ft)
 
 # Create integration measure for interface
 # Interior marker is considered as ("+") restriction
@@ -154,15 +157,14 @@ entity_maps = {
 entity_maps[omega_i][parent_cells_minus] = entity_maps[omega_i][parent_cells_plus]
 entity_maps[omega_e][parent_cells_plus] = entity_maps[omega_e][parent_cells_minus]
 
-membrane_integration_tag = 2
 dGamma = Measure(
     "dS",
     domain=mesh,
-    subdomain_data=[(membrane_integration_tag, ordered_integration_data.flatten())],
-    subdomain_id=membrane_integration_tag,
+    subdomain_data=[(interface_marker, ordered_integration_data.flatten())],
+    subdomain_id=interface_marker,
 )
 
-interface_markers = (membrane_integration_tag,)
+interface_markers = (interface_marker,)
 
 # Ionic models
 class Passive(object):
@@ -176,14 +178,14 @@ passive_model = Passive()
 ionic_models = [passive_model]
 
 # Species information
-chloride = {"Di" : 2.03,#e-9, # Intracellular diffusion coefficient
-            "De" : 2.03,#e-9, # Intracellular diffusion coefficient
-            "z"  : -1,  # Valence
-            "ki_init" : 137, # Initial intracellular concentration
-            "ke_init" : 104, # Initial extracellular concentration
-            "f_i" : 0.0, # Intracellular source term
-            "f_e" : 0.0, # Extracellular source term
-            "name" : "Cl" 
+sodium = {"Di" : 1.33,#e-9, # Intracellular diffusion coefficient
+          "De" : 1.33,#e-9, # Intracellular diffusion coefficient
+          "z"  : 1,  # Valence
+          "ki_init" : 12, # Initial intracellular concentration
+          "ke_init" : 100, # Initial extracellular concentration
+          "f_i" : 0.0, # Intracellular source term
+          "f_e" : 0.0, # Extracellular source term
+          "name" : "Na" 
 }
 potassium = {"Di" : 1.96,#e-9, # Intracellular diffusion coefficient
              "De" : 1.96,#e-9, # Intracellular diffusion coefficient
@@ -194,16 +196,17 @@ potassium = {"Di" : 1.96,#e-9, # Intracellular diffusion coefficient
              "f_e" : 0.0, # Extracellular source term
              "name" : "K" 
 }
-sodium = {"Di" : 1.33,#e-9, # Intracellular diffusion coefficient
-          "De" : 1.33,#e-9, # Intracellular diffusion coefficient
-          "z"  : 1,  # Valence
-          "ki_init" : 12, # Initial intracellular concentration
-          "ke_init" : 100, # Initial extracellular concentration
-          "f_i" : 0.0, # Intracellular source term
-          "f_e" : 0.0, # Extracellular source term
-          "name" : "Na" 
+chloride = {"Di" : 2.03,#e-9, # Intracellular diffusion coefficient
+            "De" : 2.03,#e-9, # Intracellular diffusion coefficient
+            "z"  : -1,  # Valence
+            "ki_init" : 137, # Initial intracellular concentration
+            "ke_init" : 104, # Initial extracellular concentration
+            "f_i" : 0.0, # Intracellular source term
+            "f_e" : 0.0, # Extracellular source term
+            "name" : "Cl" 
 }
-ion_list = [chloride, potassium, sodium]
+ion_list = [sodium, potassium, chloride]
+ion_list = [sodium, chloride, potassium]
 num_ions = len(ion_list)
 
 # Functions spaces
@@ -248,18 +251,20 @@ temp      = 300   # temperature (K)
 faraday   = 96485 # Faraday's constant (C/mol)
 gas_const = 8.314 # Gas constant (J/(K*mol))
 psi = dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(gas_const*temp/faraday))
-
-x, y = SpatialCoordinate(mesh)
-ue_exact = sin(pi * (x + y))
-ui_exact = sigma_e / sigma_i * ue_exact + cos(pi * (x - x_L) * (x - x_U)) * cos(
-    pi * (y - y_L) * (y - y_U)
-)
-
 n = FacetNormal(mesh)
 n_e = n(e_res)
-Im = sigma_e * inner(grad(ue_exact), n_e)
 T = Cm / (faraday*dt)
-f = ui_exact - ue_exact - 1 / T * Im
+
+exact_solutions = ExactSolutionsKNPEMI(mesh)
+exact_solutions_expr = exact_solutions.get_exact_solutions()
+exact_solutions_funcs = dict.fromkeys(exact_solutions_expr)
+exact_source_terms = exact_solutions.get_source_terms()
+for (idx, function), key in zip(enumerate(uh_), exact_solutions_funcs.keys()):
+    func = function.copy()
+    space = func.function_space
+    expr = dolfinx.fem.Expression(exact_solutions_expr[key], space.element.interpolation_points)
+    func.interpolate(expr)
+    exact_solutions_funcs[key] = func
 
 # Initialize some variables
 alpha_i_sum = 0; alpha_e_sum = 0 # Alpha fractions
@@ -294,8 +299,10 @@ for idx, ion in enumerate(ion_list):
 # The membrane trace contributions
 a  = T * (tr_phi_e - tr_phi_i) * tr_vphi_e * dGamma
 a += T * (tr_phi_i - tr_phi_e) * tr_vphi_i * dGamma
-L  = div(sigma_e * grad(ue_exact)) * vphi_e * dxE
-L -= div(sigma_i * grad(ui_exact)) * vphi_i * dxI
+L = 0
+if MMS_VERIFICATION:
+    L += div(sigma_e * grad(exact_solutions_funcs["phi_e"])) * vphi_e * dxE
+    L -= div(sigma_i * grad(exact_solutions_funcs["phi_i"])) * vphi_i * dxI
 
 # Ion specific parts
 for idx, ion in enumerate(ion_list):
@@ -350,9 +357,23 @@ for idx, ion in enumerate(ion_list):
         L += (dt * I_ch_k[interface_tag] - alpha_e(e_res) * Cm * phi_m_) / (faraday*z) * vke(e_res) * dGamma(interface_tag)
 
     # Source terms
-    L += inner(ion['f_i'], vki) * dxI
-    L += inner(ion['f_e'], vke) * dxE
+    L += inner(ion["f_i"], vki) * dxI
+    L += inner(ion["f_e"], vke) * dxE
 
+    if MMS_VERIFICATION:
+        # Concentration source terms
+        L += dt * inner(exact_source_terms[f"f_{ion['name']}_i"], vki) * dxI # Intracellular
+        L += dt * inner(exact_source_terms[f"f_{ion['name']}_e"], vke) * dxE # Extracellular
+
+        # Membrane current correction
+        L += dt/(faraday*z) * alpha_i(i_res) * inner(exact_source_terms["f_phi_m"](i_res), vki(i_res)) * dGamma
+        L -= dt/(faraday*z) * alpha_e(e_res) * inner(exact_source_terms["f_phi_m"](e_res), vke(e_res)) * dGamma
+        L -= dt/(faraday*z) * alpha_e(e_res) * inner(exact_source_terms["f_gamma"](e_res), vke(e_res)) * dGamma
+
+        # Exterior boundary fluxes
+        L -= dt * inner(dot(exact_source_terms[f"J_{ion['name']}_e"], n), vke) * ds
+        L += faraday*z * inner(dot(exact_source_terms[f"J_{ion['name']}_e"], n), vphi_e) * ds
+        
 # Weak form - potential equations
 a -= inner(J_phi_i, grad(vphi_i)) * dxI
 a -= inner(J_phi_e, grad(vphi_e)) * dxE
@@ -360,14 +381,20 @@ a -= inner(J_phi_e, grad(vphi_e)) * dxE
 # Membrane currents
 for interface_tag in interface_markers:
     L += (I_ch[interface_tag]/faraday - T * phi_m_) * (tr_vphi_e - tr_vphi_i) * dGamma(interface_tag)
+
+if MMS_VERIFICATION:
+    # Potential source terms
+    L -= inner(exact_source_terms["f_phi_i"], vphi_i) * dxI # Intracellular
+    L -= inner(exact_source_terms["f_phi_e"], vphi_e) * dxE # Extracellular
+
+    # Membrane current correction
+    L += inner(exact_source_terms["f_phi_m"](i_res), vphi_i(i_res)) * dGamma
+    L -= inner(exact_source_terms["f_phi_m"](e_res), vphi_e(e_res)) * dGamma
+    L -= inner(exact_source_terms["f_gamma"](e_res), vphi_e(e_res)) * dGamma
     
 a_compiled = dolfinx.fem.form(extract_blocks(a), entity_maps=entity_maps)
 L_compiled = dolfinx.fem.form(extract_blocks(L), entity_maps=entity_maps)
 
-sub_tag, _ = scifem.mesh.transfer_meshtags_to_submesh(
-    ft, omega_e, e_vertex_to_parent, exterior_to_parent
-)
-omega_e.topology.create_connectivity(omega_e.topology.dim - 1, omega_e.topology.dim)
 bc_dofs = dolfinx.fem.locate_dofs_topological(
     Ve, omega_e.topology.dim - 1, sub_tag.find(boundary_marker)
 )
@@ -415,24 +442,25 @@ x = b.duplicate()
 ksp.solve(b, x)
 x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
 dolfinx.fem.petsc.assign(x, uh_)
-ui = uh_[num_ions]
-ue = uh_[2*num_ions+1]
+phi_i = uh_[num_ions]
+phi_e = uh_[2*num_ions+1]
 
 num_iterations = ksp.getIterationNumber()
 converged_reason = ksp.getConvergedReason()
 print(f"Solver converged in: {num_iterations} with reason {converged_reason}")
 
-with dolfinx.io.VTXWriter(omega_i.comm, "uh_i.bp", [ui], engine="BP5") as bp:
+with dolfinx.io.VTXWriter(omega_i.comm, "uh_i.bp", [phi_i], engine="BP5") as bp:
     bp.write(0.0)
-with dolfinx.io.VTXWriter(omega_i.comm, "uh_e.bp", [ue], engine="BP5") as bp:
+with dolfinx.io.VTXWriter(omega_i.comm, "uh_e.bp", [phi_e], engine="BP5") as bp:
     bp.write(0.0)
 
-
+phi_i_exact = exact_solutions_funcs["phi_i"]
+phi_e_exact = exact_solutions_funcs["phi_e"]
 error_ui = dolfinx.fem.form(
-    inner(ui - ui_exact, ui - ui_exact) * dxI, entity_maps=entity_maps
+    inner(phi_i - phi_i_exact, phi_i - phi_i_exact) * dxI, entity_maps=entity_maps
 )
 error_ue = dolfinx.fem.form(
-    inner(ue - ue_exact, ue - ue_exact) * dxE, entity_maps=entity_maps
+    inner(phi_e - phi_e_exact, phi_e - phi_e_exact) * dxE, entity_maps=entity_maps
 )
 local_ui = dolfinx.fem.assemble_scalar(error_ui)
 local_ue = dolfinx.fem.assemble_scalar(error_ue)
