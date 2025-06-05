@@ -49,12 +49,12 @@ class ExactSolutionsKNPEMI:
         phi_e_exact = cos(2*pi * x) * cos(2*pi * y)
     
         exact_solutions = {"Na_i"  : Na_i_exact,
-                           "Na_e"  : Na_e_exact,
                            "K_i"   : K_i_exact,
-                           "K_e"   : K_e_exact,
                            "Cl_i"  : Cl_i_exact,
-                           "Cl_e"  : Cl_e_exact,
                            "phi_i" : phi_i_exact,
+                           "Na_e"  : Na_e_exact,
+                           "K_e"   : K_e_exact,
+                           "Cl_e"  : Cl_e_exact,
                            "phi_e" : phi_e_exact
         }
 
@@ -69,7 +69,6 @@ class ExactSolutionsKNPEMI:
         t = variable(self.t) # Time
         exact_solutions = self.get_exact_solutions()
         exact_gradients = dict.fromkeys(exact_solutions)
-        exact_fluxes = dict.fromkeys(exact_solutions)
         for key, function in zip(exact_solutions.keys(), exact_solutions.values()):
             exact_gradients[key] = grad(function)
 
@@ -102,9 +101,9 @@ class ExactSolutionsKNPEMI:
         Im_intra = dot(total_flux_intra, n)
 
         # Total extracellular membrane flux = -F * sum_k(z^k * J_k_i)
-        # and extracellular membrane currents = dot(total_flux_extra, n_e) = -dot(total_flux_intra, n_i) = -Im_intra
+        # and extracellular membrane currents = dot(total_flux_extra, n_e)
         total_flux_extra = -(z_Na*J_Na_e + z_K*J_K_e + z_Cl*J_Cl_e)
-        Im_extra = -Im_intra
+        Im_extra = dot(total_flux_extra, -n)
 
         # Ion channel currents
         Ich_Na = phi_m_exact
@@ -116,9 +115,9 @@ class ExactSolutionsKNPEMI:
         # where we choose Im = F * sum_k(z^k * dot(J_i_k, n_i)) = total_flux_intra
         f_phi_m = diff(phi_m_exact, t) + Ich - Im_intra
 
-        # Coupling condition for Im: Im_intra = Im_extra + f
-        # which yields f = Im_intra - Im_extra
-        f_gamma = Im_intra - Im_extra
+        # Coupling condition for Im: Im_intra = -Im_extra + f
+        # which yields f = Im_intra + Im_extra
+        f_gamma = Im_intra + Im_extra
 
         source_terms = {"f_Na_i"  : f_Na_i,
                         "f_K_i"   : f_K_i,
