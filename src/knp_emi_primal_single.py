@@ -12,7 +12,8 @@ from ufl import (
     extract_blocks,
     Measure,
     div,
-    dot
+    dot,
+    as_vector
 )
 import numpy as np
 import numpy.typing as npt
@@ -239,12 +240,13 @@ tr_vphi_e = vphi_e(e_res)
 t = 0.0
 t_end = 1.0
 if MMS_VERIFICATION:
-    temp = faraday = gas_const = sigma_e_val = sigma_i_val = Cm_val = 1
+    temp = faraday = gas_const = sigma_e_val = sigma_i_val = Cm_val = 1.0
     for ion in ion_list:
         ion["Di"] = 1.0
         ion["De"] = 1.0
     timestep = t_end - t
-
+    # Get exact solutions
+    exact_solutions = ExactSolutionsKNPEMI(mesh)
 else:
     temp      = 300   # temperature (K)
     faraday   = 96485 # Faraday's constant (C/mol)
@@ -259,27 +261,9 @@ sigma_i = dolfinx.fem.Constant(omega_i, dolfinx.default_scalar_type(sigma_i_val)
 Cm = dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(Cm_val))
 psi = dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(gas_const*temp/faraday))
 n = FacetNormal(mesh)
-n_e = n(e_res)
 dt = dolfinx.fem.Constant(mesh, timestep)
 num_timesteps = int(t_end / dt.value)
 T = Cm / (faraday*dt)
-
-# Get exact solutions
-exact_solutions = ExactSolutionsKNPEMI(mesh)
-
-def get_exact_solutions(time: float):
-    exact_solutions.t = time
-    exact_solutions_expr = exact_solutions.get_exact_solutions()
-    exact_solutions_funcs = dict.fromkeys(exact_solutions_expr)
-    exact_source_terms = exact_solutions.get_source_terms()
-    for function, key in zip(uh_, exact_solutions_funcs.keys()):
-        func = function.copy()
-        space = func.function_space
-        expr = dolfinx.fem.Expression(exact_solutions_expr[key], space.element.interpolation_points)
-        func.interpolate(expr)
-        exact_solutions_funcs[key] = func
-    
-    return exact_solutions_expr, exact_source_terms
 
 def project_onto_membrane(u: dolfinx.fem.Function):
     return None
@@ -287,7 +271,8 @@ def project_onto_membrane(u: dolfinx.fem.Function):
 def setup_variational_form(time: float):
 
     if MMS_VERIFICATION:
-        exact_solutions_funcs, exact_source_terms = get_exact_solutions(time)
+        exact_solutions.t = time
+        exact_solutions_funcs, exact_source_terms = exact_solutions.get_mms_terms()
         phi_m_ = exact_solutions_funcs["phi_i"] - exact_solutions_funcs["phi_e"]
     else:
         phi_m_ = project_onto_membrane(phi_i_ - phi_e_)
@@ -347,13 +332,11 @@ def setup_variational_form(time: float):
 
     if np.isclose(time, 0.0):
         if MMS_VERIFICATION:
-            phi_i_ = exact_solutions_funcs["phi_i"]
             uh_[num_ions].interpolate(dolfinx.fem.Expression(
                                         exact_solutions_funcs["phi_i"],
                                         uh_[num_ions].function_space.element.interpolation_points
                                         )
                                     )
-            phi_e_ = exact_solutions_funcs["phi_e"]
             uh_[2*num_ions+1].interpolate(dolfinx.fem.Expression(
                                             exact_solutions_funcs["phi_e"],
                                             uh_[2*num_ions+1].function_space.element.interpolation_points
@@ -367,10 +350,9 @@ def setup_variational_form(time: float):
     # The membrane trace contributions
     a  = T * (tr_phi_e - tr_phi_i) * tr_vphi_e * dGamma
     a += T * (tr_phi_i - tr_phi_e) * tr_vphi_i * dGamma
+    
+    # Initialize linear form
     L = 0
-    if MMS_VERIFICATION:
-        L += div(sigma_e * grad(exact_solutions_funcs["phi_e"])) * vphi_e * dxE
-        L -= div(sigma_i * grad(exact_solutions_funcs["phi_i"])) * vphi_i * dxI
 
     # Ion specific parts
     for idx, ion in enumerate(ion_list):
@@ -434,9 +416,9 @@ def setup_variational_form(time: float):
             L += dt * inner(exact_source_terms[f"f_{ion['name']}_e"], vke) * dxE # Extracellular
 
             # Membrane current correction
-            L += dt/(faraday*z) * alpha_i(i_res) * inner(exact_source_terms["f_phi_m"](i_res), vki(i_res)) * dGamma
-            L -= dt/(faraday*z) * alpha_e(e_res) * inner(exact_source_terms["f_phi_m"](e_res), vke(e_res)) * dGamma
-            L -= dt/(faraday*z) * alpha_e(e_res) * inner(exact_source_terms["f_gamma"](e_res), vke(e_res)) * dGamma
+            L += dt/(faraday*z) * alpha_i(i_res) * inner(exact_source_terms[f"f_phi_{ion['name']}"], vki(i_res)) * dGamma
+            L -= dt/(faraday*z) * alpha_e(e_res) * inner(exact_source_terms[f"f_phi_{ion['name']}"], vke(e_res)) * dGamma
+            L -= dt/(faraday*z) * alpha_e(e_res) * inner(exact_source_terms["f_gamma"], vke(e_res)) * dGamma
 
             # Exterior boundary fluxes
             L -= dt * inner(dot(exact_source_terms[f"J_{ion['name']}_e"], n), vke) * ds
@@ -456,14 +438,23 @@ def setup_variational_form(time: float):
         L -= inner(exact_source_terms["f_phi_e"], vphi_e) * dxE # Extracellular
 
         # Membrane current correction
-        L += inner(exact_source_terms["f_phi_m"](i_res), vphi_i(i_res)) * dGamma
-        L -= inner(exact_source_terms["f_phi_m"](e_res), vphi_e(e_res)) * dGamma
-        L -= inner(exact_source_terms["f_gamma"](e_res), vphi_e(e_res)) * dGamma
+        L += inner(exact_source_terms["f_phi_m"], tr_vphi_i) * dGamma
+        L -= inner(exact_source_terms["f_phi_m"], tr_vphi_e) * dGamma
+        L -= inner(exact_source_terms["f_gamma"], tr_vphi_e) * dGamma
         
     a_compiled = dolfinx.fem.form(extract_blocks(a), entity_maps=entity_maps)
     L_compiled = dolfinx.fem.form(extract_blocks(L), entity_maps=entity_maps)
 
-    return a_compiled, L_compiled
+    if MMS_VERIFICATION:
+        return a_compiled, L_compiled, exact_solutions_funcs
+    else:
+        return a_compiled, L_compiled
+
+
+if MMS_VERIFICATION:
+    a_compiled, L_compiled, initial_exact_solutions_funcs = setup_variational_form(time=t)
+else:
+    a_compiled, L_compiled = setup_variational_form(time=t)
 
 bc_e_dofs = dolfinx.fem.locate_dofs_topological(
     Ve, omega_e.topology.dim-1, sub_tag_e.find(boundary_marker)
@@ -471,8 +462,7 @@ bc_e_dofs = dolfinx.fem.locate_dofs_topological(
 bcs = []
 u_bc_e = dolfinx.fem.Function(Ve)
 if MMS_VERIFICATION:
-    exact_solutions_funcs, _ = get_exact_solutions(t)
-    bc_e = exact_solutions_funcs["phi_e"]
+    bc_e = initial_exact_solutions_funcs["phi_e"]
     u_bc_e.interpolate(dolfinx.fem.Expression(
                         bc_e,
                         u_bc_e.function_space.element.interpolation_points
@@ -481,7 +471,7 @@ if MMS_VERIFICATION:
     # BCs for concentrations
     bc_funcs_ions = []
     for idx, ion in enumerate(ion_list):
-        exact_func = exact_solutions_funcs[ion["name"]+"_e"]
+        exact_func = initial_exact_solutions_funcs[ion["name"]+"_e"]
         func = dolfinx.fem.Function(Ve)
         func.interpolate(dolfinx.fem.Expression(
                         exact_func,
@@ -489,15 +479,12 @@ if MMS_VERIFICATION:
                     )
                 )
         bc_funcs_ions.append(func)
-        dofs = dolfinx.fem.locate_dofs_topological(Ve, ft.dim, sub_tag_e.find(boundary_marker))
-        bc   = dolfinx.fem.dirichletbc(func, dofs)
+        bc   = dolfinx.fem.dirichletbc(func, bc_e_dofs)
         bcs.append(bc)
 else:
     bc_e = lambda x: np.sin(np.pi * (x[0] + x[1]))
     u_bc_e.interpolate(bc_e)
 bcs.append(dolfinx.fem.dirichletbc(u_bc_e, bc_e_dofs))
-
-a_compiled, L_compiled = setup_variational_form(time=t)
 
 A = dolfinx.fem.petsc.create_matrix(a_compiled, kind="mpi")
 b = dolfinx.fem.petsc.create_vector(L_compiled, kind="mpi")
@@ -548,20 +535,43 @@ bp_names = ["Na_i.bp", "K_i.bp", "Cl_i.bp", "phi_i.bp",
 bps = [dolfinx.io.VTXWriter(comm, bp_names[i], [uh_[i]], engine="BP5") for i in range(len(uh_))]
 [bp.write(t) for bp in bps]
 
+if MMS_VERIFICATION:
+    phi_i_exact = initial_exact_solutions_funcs["phi_i"]
+    phi_e_exact = initial_exact_solutions_funcs["phi_e"]
+    error_ui = dolfinx.fem.form(
+        inner(phi_i_ - phi_i_exact, phi_i_ - phi_i_exact) * dxI, entity_maps=entity_maps
+    )
+    error_ue = dolfinx.fem.form(
+        inner(phi_e_ - phi_e_exact, phi_e_ - phi_e_exact) * dxE, entity_maps=entity_maps
+    )
+    local_ui = dolfinx.fem.assemble_scalar(error_ui)
+    local_ue = dolfinx.fem.assemble_scalar(error_ue)
+    global_ui = np.sqrt(mesh.comm.allreduce(local_ui, op=MPI.SUM))
+    global_ue = np.sqrt(mesh.comm.allreduce(local_ue, op=MPI.SUM))
+    print(f"L2(ui): {global_ui:.2e}\nL2(ue): {global_ue:.2e}")
+
+    phi_i_exact_func = dolfinx.fem.Function(Vi)
+    phi_e_exact_func = dolfinx.fem.Function(Ve)
+    phi_i_expr = dolfinx.fem.Expression(phi_i_exact, Vi.element.interpolation_points)
+    phi_e_expr = dolfinx.fem.Expression(phi_e_exact, Ve.element.interpolation_points)
+    phi_i_exact_func.interpolate(phi_i_expr)
+    phi_e_exact_func.interpolate(phi_e_expr)
+    vtx1 = dolfinx.io.VTXWriter(comm, "phi_i_exact.bp", [phi_i_exact_func], "BP5")
+    vtx2 = dolfinx.io.VTXWriter(comm, "phi_e_exact.bp", [phi_e_exact_func], "BP5")
+    vtx1.write(t)
+    vtx2.write(t)
+
 for _ in range(num_timesteps):
     t += dt.value # Increment time
     print(f"Time = {t}")
 
-    if MMS_VERIFICATION:
-        exact_solutions_funcs, _ = get_exact_solutions(t)
-        u_bc_e.interpolate(dolfinx.fem.Expression(
-                        exact_solutions_funcs["phi_e"],
-                        u_bc_e.function_space.element.interpolation_points
-                    )
-                )
-        
     # Setup variational form and assemble system
-    a_compiled, L_compiled = setup_variational_form(time=t)
+    if MMS_VERIFICATION:
+        a_compiled, L_compiled, exact_solutions_funcs = setup_variational_form(time=t)
+        # Don't need to update BCs because functions are constant on boundary
+    else:
+        a_compiled, L_compiled = setup_variational_form(time=t)
+    
     assemble_system()
 
     # Solve and update
@@ -594,3 +604,14 @@ if MMS_VERIFICATION:
     global_ui = np.sqrt(mesh.comm.allreduce(local_ui, op=MPI.SUM))
     global_ue = np.sqrt(mesh.comm.allreduce(local_ue, op=MPI.SUM))
     print(f"L2(ui): {global_ui:.2e}\nL2(ue): {global_ue:.2e}")
+
+
+    phi_i_expr = dolfinx.fem.Expression(phi_i_exact, Vi.element.interpolation_points)
+    phi_e_expr = dolfinx.fem.Expression(phi_e_exact, Ve.element.interpolation_points)
+    phi_i_exact_func.interpolate(phi_i_expr)
+    phi_e_exact_func.interpolate(phi_e_expr)
+    vtx1.write(t)
+    vtx2.write(t)
+
+    vtx1.close()
+    vtx2.close()

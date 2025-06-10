@@ -47,7 +47,7 @@ class ExactSolutionsKNPEMI:
         # potentials
         phi_i_exact = cos(2*pi * x) * cos(2*pi * y) * (1 + exp(-t))
         phi_e_exact = cos(2*pi * x) * cos(2*pi * y)
-    
+        
         exact_solutions = {"Na_i"  : Na_i_exact,
                            "K_i"   : K_i_exact,
                            "Cl_i"  : Cl_i_exact,
@@ -60,7 +60,7 @@ class ExactSolutionsKNPEMI:
 
         return exact_solutions
 
-    def get_source_terms(self):
+    def get_mms_terms(self):
         # Valences
         z_Na = 1
         z_K  = 1
@@ -71,7 +71,7 @@ class ExactSolutionsKNPEMI:
         exact_gradients = dict.fromkeys(exact_solutions)
         for key, function in zip(exact_solutions.keys(), exact_solutions.values()):
             exact_gradients[key] = grad(function)
-
+        
         # Membrane potential
         phi_m_exact = exact_solutions["phi_i"] - exact_solutions["phi_e"]
 
@@ -100,7 +100,7 @@ class ExactSolutionsKNPEMI:
         total_flux_intra = z_Na*J_Na_i + z_K*J_K_i + z_Cl*J_Cl_i
         Im_intra = dot(total_flux_intra, n)
 
-        # Total extracellular membrane flux = -F * sum_k(z^k * J_k_i)
+        # Total extracellular membrane flux = -F * sum_k(z^k * J_k_e)
         # and extracellular membrane currents = dot(total_flux_extra, n_e)
         total_flux_extra = -(z_Na*J_Na_e + z_K*J_K_e + z_Cl*J_Cl_e)
         Im_extra = dot(total_flux_extra, -n)
@@ -111,13 +111,18 @@ class ExactSolutionsKNPEMI:
         Ich_Cl = phi_m_exact
         Ich = Ich_Na + Ich_K + Ich_Cl
 
+        i_res = "+"
+        e_res = "-"
         # Equation for the membrane potential source term: f = Cm*d(phi_m)/dt - (Im - Ich) 
         # where we choose Im = F * sum_k(z^k * dot(J_i_k, n_i)) = total_flux_intra
-        f_phi_m = diff(phi_m_exact, t) + Ich - Im_intra
+        f_phi_Na = diff(phi_m_exact, t) + Ich_Na - Im_intra(i_res)
+        f_phi_K = diff(phi_m_exact, t) + Ich_K - Im_intra(i_res)
+        f_phi_Cl = diff(phi_m_exact, t) + Ich_Cl - Im_intra(i_res)
+        f_phi_m = diff(phi_m_exact, t) + Ich - Im_intra(i_res)
 
         # Coupling condition for Im: Im_intra = -Im_extra + f
         # which yields f = Im_intra + Im_extra
-        f_gamma = Im_intra + Im_extra
+        f_gamma = Im_intra(i_res) + Im_extra(e_res)
 
         source_terms = {"f_Na_i"  : f_Na_i,
                         "f_K_i"   : f_K_i,
@@ -131,7 +136,10 @@ class ExactSolutionsKNPEMI:
                         "f_gamma" : f_gamma,
                         "J_Na_e"  : J_Na_e,
                         "J_K_e"   : J_K_e,
-                        "J_Cl_e"  : J_Cl_e
+                        "J_Cl_e"  : J_Cl_e,
+                        "f_phi_Na" : f_phi_Na,
+                        "f_phi_K"  : f_phi_K,
+                        "f_phi_Cl" : f_phi_Cl
         }
         
-        return source_terms
+        return exact_solutions, source_terms
