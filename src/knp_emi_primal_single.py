@@ -238,13 +238,13 @@ tr_vphi_e = vphi_e(e_res)
 
 # Constants
 t = 0.0
-t_end = 1.0
 if MMS_VERIFICATION:
     temp = faraday = gas_const = sigma_e_val = sigma_i_val = Cm_val = 1.0
     for ion in ion_list:
         ion["Di"] = 1.0
         ion["De"] = 1.0
-    timestep = t_end - t
+    timestep = 1.0e-5#t_end - t
+    t_end = timestep 
     # Get exact solutions
     exact_solutions = ExactSolutionsKNPEMI(mesh)
 else:
@@ -254,7 +254,8 @@ else:
     Cm_val = 1.0
     sigma_e_val = 2.0
     sigma_i_val = 1.0
-    timestep  = 1e-2
+    timestep  = 1e-5
+    t_end = 1.0
 
 sigma_e = dolfinx.fem.Constant(omega_e, dolfinx.default_scalar_type(sigma_e_val))
 sigma_i = dolfinx.fem.Constant(omega_i, dolfinx.default_scalar_type(sigma_i_val))
@@ -263,7 +264,6 @@ psi = dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(gas_const*temp/fara
 n = FacetNormal(mesh)
 dt = dolfinx.fem.Constant(mesh, timestep)
 num_timesteps = int(t_end / dt.value)
-T = Cm / (faraday*dt)
 
 def project_onto_membrane(u: dolfinx.fem.Function):
     return None
@@ -348,8 +348,8 @@ def setup_variational_form(time: float):
 
     # Setup variational form
     # The membrane trace contributions
-    a  = T * (tr_phi_e - tr_phi_i) * tr_vphi_e * dGamma
-    a += T * (tr_phi_i - tr_phi_e) * tr_vphi_i * dGamma
+    a  = Cm/(faraday*dt) * (tr_phi_e - tr_phi_i) * tr_vphi_e * dGamma
+    a += Cm/(faraday*dt) * (tr_phi_i - tr_phi_e) * tr_vphi_i * dGamma
     
     # Initialize linear form
     L = 0
@@ -407,8 +407,8 @@ def setup_variational_form(time: float):
             L += (dt * I_ch_k[interface_tag] - alpha_e(e_res) * Cm * phi_m_) / (faraday*z) * vke(e_res) * dGamma(interface_tag)
 
         # Source terms
-        L += inner(ion["f_i"], vki) * dxI
-        L += inner(ion["f_e"], vke) * dxE
+        L += dt * inner(ion["f_i"], vki) * dxI
+        L += dt * inner(ion["f_e"], vke) * dxE
 
         if MMS_VERIFICATION:
             # Concentration source terms
@@ -430,7 +430,7 @@ def setup_variational_form(time: float):
 
     # Membrane currents
     for interface_tag in interface_markers:
-        L += (I_ch[interface_tag]/faraday - T * phi_m_) * (tr_vphi_e - tr_vphi_i) * dGamma(interface_tag)
+        L += (1/faraday) * (I_ch[interface_tag] - Cm*phi_m_/dt) * (tr_vphi_e - tr_vphi_i) * dGamma(interface_tag)
 
     if MMS_VERIFICATION:
         # Potential source terms
@@ -561,32 +561,32 @@ if MMS_VERIFICATION:
     vtx1.write(t)
     vtx2.write(t)
 
-for _ in range(num_timesteps):
-    t += dt.value # Increment time
-    print(f"Time = {t}")
+# for _ in range(num_timesteps):
+t += dt.value # Increment time
+print(f"Time = {t}")
 
-    # Setup variational form and assemble system
-    if MMS_VERIFICATION:
-        a_compiled, L_compiled, exact_solutions_funcs = setup_variational_form(time=t)
-        # Don't need to update BCs because functions are constant on boundary
-    else:
-        a_compiled, L_compiled = setup_variational_form(time=t)
-    
-    assemble_system()
+# Setup variational form and assemble system
+if MMS_VERIFICATION:
+    a_compiled, L_compiled, exact_solutions_funcs = setup_variational_form(time=t)
+    # Don't need to update BCs because functions are constant on boundary
+else:
+    a_compiled, L_compiled = setup_variational_form(time=t)
 
-    # Solve and update
-    ksp.solve(b, x)
-    x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-    dolfinx.fem.petsc.assign(x, uh_)
-    
-    phi_i_.x.array[:] = uh_[num_ions].x.array.copy()
-    phi_e_.x.array[:] = uh_[2*num_ions+1].x.array.copy()
+assemble_system()
 
-    num_iterations = ksp.getIterationNumber()
-    converged_reason = ksp.getConvergedReason()
-    print(f"Solver converged in: {num_iterations} with reason {converged_reason}")
+# Solve and update
+ksp.solve(b, x)
+x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
+dolfinx.fem.petsc.assign(x, uh_)
 
-    [bp.write(t) for bp in bps]
+phi_i_.x.array[:] = uh_[num_ions].x.array.copy()
+phi_e_.x.array[:] = uh_[2*num_ions+1].x.array.copy()
+
+num_iterations = ksp.getIterationNumber()
+converged_reason = ksp.getConvergedReason()
+print(f"Solver converged in: {num_iterations} with reason {converged_reason}")
+
+[bp.write(t) for bp in bps]
 
 [bp.close() for bp in bps]
 
