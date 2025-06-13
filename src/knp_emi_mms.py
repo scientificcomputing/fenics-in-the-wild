@@ -13,10 +13,10 @@ from ufl import (sin,
                 )
 
 class ExactSolutionsKNPEMI:
-    def __init__(self, mesh: dolfinx.mesh.Mesh):
+    def __init__(self, mesh: dolfinx.mesh.Mesh, t: dolfinx.fem.Constant):
         self.mesh = mesh
         self.x, self.y = SpatialCoordinate(mesh)
-        self.t = 0 # Time
+        self.t = t # Time
         self.n = FacetNormal(mesh)
 
 
