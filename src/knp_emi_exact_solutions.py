@@ -15,41 +15,49 @@ from ufl import (sin,
 class ExactSolutionsKNPEMI:
     def __init__(self, mesh: dolfinx.mesh.Mesh, t: dolfinx.fem.Constant):
         self.mesh = mesh
-        self.x, self.y = SpatialCoordinate(mesh)
+        if mesh.geometry.dim==2:
+            self.x, self.y = SpatialCoordinate(mesh)
+        elif mesh.geometry.dim==3:
+            self.x, self.y, self.z = SpatialCoordinate(mesh)
+        else:
+            raise ValueError("Mesh geometry dimension must be 2 or 3.")
+            
         self.t = t # Time
         self.n = FacetNormal(mesh)
 
 
     def get_exact_solutions(self):
-        x, y, t = self.x, self.y, self.t # Ease notation
 
-        # sodium (Na) concentration
-        Na_i_exact = 0.7 + 0.3 * sin(2*pi * x) * sin(2*pi * y) * exp(
-            -t
-        )
-        Na_e_exact = 1.0 + 0.6 * sin(2*pi * x) * sin(2*pi * y) * exp(
-            -t
-        )
-        # potassium (K) concentration
-        K_i_exact = 0.3 + 0.3 * sin(2*pi * x) * sin(2*pi * y) * exp(
-            -t
-        )
-        K_e_exact = 1.0 + 0.2 * sin(2*pi * x) * sin(2*pi * y) * exp(
-            -t
-        )
-        # chloride (Cl) concentration
-        Cl_i_exact = 1.0 + 0.6 * sin(2*pi * x) * sin(2*pi * y) * exp(
-            -t
-        )
-        Cl_e_exact = 2.0 + 0.8 * sin(2*pi * x) * sin(2*pi * y) * exp(
-            -t
-        )
-        # potentials
-        phi_i_exact = cos(2*pi * x) * cos(2*pi * y) * (1 + exp(-t))
-        phi_e_exact = cos(2*pi * x) * cos(2*pi * y)
+        t = self.t
 
-        phi_i_init = cos(2*pi * x) * cos(2*pi * y)
-        phi_e_init = cos(2*pi * x) * cos(2*pi * y)
+        if self.mesh.geometry.dim==2:
+            x, y = self.x, self.y
+            variable_term =  sin(2*pi*x) * sin(2*pi*y) * exp(-t)
+            potential_term = cos(2*pi*x) * cos(2*pi*y)
+        else:
+            x, y, z = self.x, self.y, self.z
+            variable_term =  sin(2*pi*x) * sin(2*pi*y) * sin(2*pi*z) * exp(-t)
+            potential_term = cos(2*pi*x) * cos(2*pi*y) * cos(2*pi*z)
+        
+        # Define exact solutions
+        # Sodium (Na) concentration
+        Na_i_exact = 0.7 + 0.3 * variable_term
+        Na_e_exact = 1.0 + 0.6 * variable_term
+        
+        # Potassium (K) concentration
+        K_i_exact = 0.3 + 0.3 * variable_term
+        K_e_exact = 1.0 + 0.2 * variable_term
+
+        # Chloride (Cl) concentration
+        Cl_i_exact = 1.0 + 0.6 * variable_term
+        Cl_e_exact = 2.0 + 0.8 * variable_term
+
+        # Electric potentials
+        phi_i_exact = potential_term * (1 + exp(-t))
+        phi_e_exact = potential_term
+
+        phi_i_init = potential_term
+        phi_e_init = potential_term
         
         exact_solutions = {"Na_i"  : Na_i_exact,
                            "K_i"   : K_i_exact,

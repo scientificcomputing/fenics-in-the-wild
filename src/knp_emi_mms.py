@@ -12,8 +12,7 @@ from ufl import (
     extract_blocks,
     Measure,
     dot,
-    Coefficient,
-    ZeroBaseForm
+    Coefficient
 )
 import numpy as np
 import numpy.typing as npt
@@ -25,6 +24,8 @@ x_L = 0.25
 x_U = 0.75
 y_L = 0.25
 y_U = 0.75
+z_L = 0.25
+z_U = 0.75
 
 def interior_marker_function(x, tol=1e-12):
     lower_bound = lambda x, i, bound: x[i] >= bound - tol
@@ -32,14 +33,16 @@ def interior_marker_function(x, tol=1e-12):
     return (
         lower_bound(x, 0, x_L)
         & lower_bound(x, 1, y_L)
+        & lower_bound(x, 2, z_L)
         & upper_bound(x, 0, x_U)
         & upper_bound(x, 1, y_U)
+        & upper_bound(x, 2, z_U)
     )
-    
+
 # Steps to set up submeshes and interface
 M = int(argv[1])
-mesh = dolfinx.mesh.create_unit_square(
-    MPI.COMM_WORLD, M, M, ghost_mode=dolfinx.mesh.GhostMode.shared_facet
+mesh = dolfinx.mesh.create_unit_cube(
+    MPI.COMM_WORLD, M, M, M, ghost_mode=dolfinx.mesh.GhostMode.shared_facet
 )
 
 interior_cells = dolfinx.mesh.locate_entities(mesh, mesh.topology.dim, interior_marker_function)
@@ -528,8 +531,15 @@ b = dolfinx.fem.petsc.create_vector(L_compiled, kind="mpi") # RHS vector
 x = b.duplicate() # Solution vector
 
 ksp = PETSc.KSP().create(mesh.comm)
-use_iterative_solver = True
-if use_iterative_solver:
+
+use_direct_solver = False
+if use_direct_solver:
+    # Configure PETSc solver: direct solver using MUMPS
+    ksp.setOperators(A)
+    ksp.setType("preonly")
+    ksp.getPC().setType("lu")
+    ksp.getPC().setFactorSolverType("mumps")
+else:
     # Assemble preconditioner matrix
     P_compiled = setup_preconditioner_form()
     B = dolfinx.fem.petsc.assemble_matrix(P_compiled, kind="mpi", bcs=bcs)
@@ -542,12 +552,6 @@ if use_iterative_solver:
     ksp.getPC().setFactorSolverType("mumps")
     ksp.setTolerances(1.0e-7)
     ksp.setNormType(PETSc.KSP.NormType.NORM_PRECONDITIONED)
-else:
-    # Configure PETSc solver: direct solver using MUMPS
-    ksp.setOperators(A)
-    ksp.setType("preonly")
-    ksp.getPC().setType("lu")
-    ksp.getPC().setFactorSolverType("mumps")
 
 ksp.setMonitor(lambda ksp, its, rnorm: print(f"Iteration: {its}, residual: {rnorm}"))
 ksp.setErrorIfNotConverged(True)
