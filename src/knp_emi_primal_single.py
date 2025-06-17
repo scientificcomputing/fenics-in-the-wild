@@ -11,15 +11,14 @@ from ufl import (
     MixedFunctionSpace,
     extract_blocks,
     Measure,
-    div,
-    dot,
-    as_vector
+    Coefficient,
+    ln,
+    exp
 )
 import numpy as np
 import numpy.typing as npt
 import scifem
 from packaging.version import Version
-from knp_emi_mms import ExactSolutionsKNPEMI
 
 x_L = 0.25
 x_U = 0.75
@@ -184,45 +183,47 @@ Ve = dolfinx.fem.functionspace(omega_e, element)
 sodium = {"Di" : dolfinx.fem.Constant(mesh, 1.33e-9), # Intracellular diffusion coefficient
           "De" : dolfinx.fem.Constant(mesh, 1.33e-9), # Intracellular diffusion coefficient
           "z"  : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(1)),  # Valence
-          "ki_init" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(12)), # Initial intracellular concentration
-          "ke_init" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(100)), # Initial extracellular concentration
-          "f_i" : dolfinx.fem.Function(Vi), # Intracellular source term
-          "f_e" : dolfinx.fem.Function(Ve), # Extracellular source term
+          "init_i" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(12)), # Initial intracellular concentration
+          "init_e" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(100)), # Initial extracellular concentration
           "name" : "Na" 
 }
 potassium = {"Di" : dolfinx.fem.Constant(mesh, 1.96e-9), # Intracellular diffusion coefficient
              "De" : dolfinx.fem.Constant(mesh, 1.96e-9), # Intracellular diffusion coefficient
              "z"  : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(1)),  # Valence
-             "ki_init" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(125)), # Initial intracellular concentration
-             "ke_init" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(4)), # Initial extracellular concentration
-             "f_i" : dolfinx.fem.Function(Vi), # Intracellular source term
-             "f_e" : dolfinx.fem.Function(Ve), # Extracellular source term
+             "init_i" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(125)), # Initial intracellular concentration
+             "init_e" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(4)), # Initial extracellular concentration
              "name" : "K" 
 }
 chloride = {"Di" : dolfinx.fem.Constant(mesh, 2.03e-9), # Intracellular diffusion coefficient
             "De" : dolfinx.fem.Constant(mesh, 2.03e-9), # Intracellular diffusion coefficient
             "z"  : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(-1)),  # Valence
-            "ki_init" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(137)), # Initial intracellular concentration
-            "ke_init" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(104)), # Initial extracellular concentration
-            "f_i" : dolfinx.fem.Function(Vi), # Intracellular source term
-            "f_e" : dolfinx.fem.Function(Ve), # Extracellular source term
+            "init_i" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(137)), # Initial intracellular concentration
+            "init_e" : dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(104)), # Initial extracellular concentration
             "name" : "Cl" 
 }
 ion_list = [sodium, potassium, chloride]
 num_ions = len(ion_list)
-
-interior_spaces = [Vi for _ in range(num_ions+1)]
-exterior_spaces = [Ve for _ in range(num_ions+1)]
+names = ["Na_i", "K_i", "Cl_i", "phi_i", "Na_e", "K_e", "Cl_e", "phi_e"]
+interior_spaces = [Vi.clone() for _ in range(num_ions+1)]
+exterior_spaces = [Ve.clone() for _ in range(num_ions+1)]
 spaces = (interior_spaces+exterior_spaces)
 W = MixedFunctionSpace(*spaces)
 u = TrialFunctions(W)
 v = TestFunctions(W)
-
 uh_ = [dolfinx.fem.Function(space) for space in spaces] # Previous timestep functions
-phi_i_ = dolfinx.fem.Function(Vi)
-phi_e_ = dolfinx.fem.Function(Ve)
-phi_i_init = -0.06774 # Initial intracellular potential (V)
-phi_e_init = 0.0 # Initial extracellular potential (V)
+
+# Get previous timestep potential functions and
+# set initial conditions for the potentials
+phi_i_ = uh_[num_ions]
+phi_e_ = uh_[2*num_ions+1]
+phi_i_init = dolfinx.fem.Constant(mesh, -0.06774) # Initial intracellular potential (V)
+phi_e_init = dolfinx.fem.Constant(mesh, 0.0)      # Initial extracellular potential (V)
+phi_rest     = dolfinx.fem.Constant(mesh, -0.065) # Resting membrane potential (V)
+
+# Add source terms to ions
+for idx, ion in enumerate(ion_list):
+    ion["f_i"] = dolfinx.fem.Function(uh_[idx].function_space) # Intracellular source term
+    ion["f_e"] = dolfinx.fem.Function(uh_[num_ions+1+idx].function_space) # Extracellular source term
 
 # Extract potential functions
 phi_i  = u[num_ions] # Intracellular trial function
@@ -239,27 +240,15 @@ tr_vphi_i = vphi_i(i_res)
 tr_vphi_e = vphi_e(e_res)
 
 # Constants
-t = dolfinx.fem.Constant(mesh, 0.0) # Time
-temp = faraday = gas_const = sigma_e_val = sigma_i_val = Cm_val = 1.0
-for ion in ion_list:
-    ion["Di"] = 1.0
-    ion["De"] = 1.0
-timestep = 1.0e-3#t_end - t
-t_end = timestep 
-# Get exact solutions
-exact_solutions = ExactSolutionsKNPEMI(mesh, t)
-exact_solutions_funcs, exact_source_terms = exact_solutions.get_mms_terms()
-phi_m_ = exact_solutions_funcs["phi_i"] - exact_solutions_funcs["phi_e"]
-
-# temp      = 300   # temperature (K)
-# faraday   = 96485 # Faraday's constant (C/mol)
-# gas_const = 8.314 # Gas constant (J/(K*mol))
-# Cm_val = 1.0
-# sigma_e_val = 2.0
-# sigma_i_val = 1.0
-# timestep  = 1e-5
-# t_end = 1.0
-# phi_m_ = project_onto_membrane(phi_i_ - phi_e_)
+temp      = 300   # temperature (K)
+faraday   = 96485 # Faraday's constant (C/mol)
+gas_const = 8.314 # Gas constant (J/(K*mol))
+Cm_val = 1.0
+sigma_e_val = 2.0
+sigma_i_val = 1.0
+timestep  = 1e-1
+t_end = 1.0
+phi_m_ = dolfinx.fem.Constant(mesh, 0.0)#project_onto_membrane(phi_i_ - phi_e_)
 
 sigma_e = dolfinx.fem.Constant(omega_e, dolfinx.default_scalar_type(sigma_e_val))
 sigma_i = dolfinx.fem.Constant(omega_i, dolfinx.default_scalar_type(sigma_i_val))
@@ -268,19 +257,139 @@ psi = dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(gas_const*temp/fara
 n = FacetNormal(mesh)
 dt = dolfinx.fem.Constant(mesh, timestep)
 num_timesteps = int(t_end / dt.value)
-
+t = dolfinx.fem.Constant(mesh, 0.0) # Time
 
 # Ionic models
 class Passive(object):
     tags = interface_markers
+    stimulus_tags = None
+
     def __init__(self) -> None:
         pass
 
-    def _eval(self, ion_number: int):
+    def _eval(self, ion_idx: int):
         return phi_m_
-passive_model = Passive()
-ionic_models = [passive_model]
 
+class HodginHuxley(object):
+    tags = interface_markers # Interface tags
+    stimulus_tags = interface_markers
+    time_steps_ODE = 25
+
+    # Initial gating variable values [dimensionless]
+    n_init = 0.27622914792
+    m_init = 0.03791834627
+    h_init = 0.68848921811
+
+    # Stimulus current paramters
+    g_Na_bar  = dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(1200))  # Na max conductivity [S/m**2]
+    g_K_bar   = dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(360))   # K max conductivity [S/m**2]
+    a_syn     = dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(0.002)) # Synaptic time constant [s]
+    g_syn_bar = dolfinx.fem.Constant(mesh, dolfinx.default_scalar_type(40))    # Synaptic conductivity [S/m**2]
+
+    # Leak current conductivities [S/m**2]
+    g_leak = {"Na" : dolfinx.fem.Constant(mesh, 2.0*0.5),
+              "K"  : dolfinx.fem.Constant(mesh, 8.0*0.5),
+              "Cl" : dolfinx.fem.Constant(mesh, 0.0)
+            }
+
+    def __init__(self) -> None:
+        pass
+
+    def __str__(self):
+        return f"Hodgkin-Huxley"
+
+    def _init(self):
+        
+        # Initialize gating variables in a continuous 
+        # first-order Lagrange finite element space
+        G = dolfinx.fem.functionspace(mesh, ("Lagrange", 1))
+
+        self.n = dolfinx.fem.Function(G)
+        self.m = dolfinx.fem.Function(G)
+        self.h = dolfinx.fem.Function(G)
+
+        self.n.x.array[:] = self.n_init
+        self.m.x.array[:] = self.m_init
+        self.h.x.array[:] = self.h_init
+
+    def _eval(self, ion_idx: int):
+        """ Evaluate and return the channel current for ion number 'ion_idx'.
+
+        Parameters
+        ----------
+        ion_idx : int
+            Ion index.
+
+        Returns
+        -------
+        I_ch : float
+            The value of the passive channel current.
+        """
+        ion = ion_list[ion_idx]
+        ion["g_k"] = self.g_leak[ion["name"]] # Get the leak current for the current ion
+
+        # Add stimulus and gating variable terms
+        if ion["name"]=="Na":
+            ion["g_k"] += self.g_Na_bar * self.m**3 * self.h
+        elif ion["name"]=="K":
+            ion["g_k"] += self.g_K_bar * self.n**4
+        
+        # Calculate channel current
+        I_ch = ion["g_k"] * (phi_m_ - ion["E"])
+        
+        return I_ch
+    
+    def g_syn(self):
+        return self.g_syn_bar * exp(-np.mod(t.value, 0.01) / self.a_syn)
+
+    def _add_stimulus(self):
+        """ Evaluate and return the stimulus part of the channel current for the Sodium ion. """
+        ion = ion_list[0]
+        assert ion["name"]=="Na"
+
+        return self.g_syn() * (phi_m_ - ion["E"])
+
+    def update_gating_variables(self):
+
+        dt_ode = dt.value / self.time_steps_ODE # ODE timestep size
+
+        V_M = 1000 * (phi_m_.value - phi_rest.value) # Convert membrane potential to mV
+
+        alpha_n = 0.01e3 * (10.0 - V_M) / (np.exp((10.0 - V_M) / 10.0) - 1.0)
+        beta_n = 0.125e3 * np.exp(-V_M / 80.0)
+        alpha_m = 0.1e3 * (25.0 - V_M) / (np.exp((25.0 - V_M) / 10.0) - 1)
+        beta_m = 4.0e3 * np.exp(-V_M / 18.0)
+        alpha_h = 0.07e3 * np.exp(-V_M / 20.0)
+        beta_h = 1.0e3 / (np.exp((30.0 - V_M) / 10.0) + 1)
+
+        tau_y_n = 1.0 / (alpha_n + beta_n)
+        tau_y_m = 1.0 / (alpha_m + beta_m)
+        tau_y_h = 1.0 / (alpha_h + beta_h)
+
+        y_inf_n = alpha_n * tau_y_n
+        y_inf_m = alpha_m * tau_y_m
+        y_inf_h = alpha_h * tau_y_h
+
+        y_exp_n = np.exp(-dt_ode / tau_y_n)
+        y_exp_m = np.exp(-dt_ode / tau_y_m)
+        y_exp_h = np.exp(-dt_ode / tau_y_h)
+
+        for _ in range(self.time_steps_ODE):
+            # Get vector entries local to process + ghosts
+            with self.n.x.petsc_vec.localForm() as loc_n, \
+                 self.m.x.petsc_vec.localForm() as loc_m, \
+                 self.h.x.petsc_vec.localForm() as loc_h:
+                loc_n[:] = y_inf_n + (loc_n[:] - y_inf_n) * y_exp_n
+                loc_m[:] = y_inf_m + (loc_m[:] - y_inf_m) * y_exp_m
+                loc_h[:] = y_inf_h + (loc_h[:] - y_inf_h) * y_exp_h
+
+passive_model = Passive()
+hodgin_huxley_model = HodginHuxley()
+hodgin_huxley_model._init()
+ionic_models = [hodgin_huxley_model]
+
+# Setup functions for the variational form
+# and the preconditioner
 def setup_variational_form():
 
     # Initialize some variables
@@ -296,17 +405,22 @@ def setup_variational_form():
         De = ion['De']
         uh_i = uh_[idx]
         uh_e = uh_[num_ions+1+idx]
-
-        if np.isclose(t.value, 0.0):
-        
+    
+        # Set initial conditions
+        if isinstance(ion['init_i'], dolfinx.fem.Constant):
+            uh_i.x.array[:] = ion['init_i'].value
+        else:
             uh_i.interpolate(dolfinx.fem.Expression(
-                                    exact_solutions_funcs[ion["name"]+"_i"],
+                                    ion['init_i'],
                                     uh_i.function_space.element.interpolation_points
                                     )
                                 )
+        if isinstance(ion['init_e'], dolfinx.fem.Constant):
+            uh_e.x.array[:] = ion['init_e'].value
+        else:
             uh_e.interpolate(dolfinx.fem.Expression(
-                                        exact_solutions_funcs[ion["name"]+"_e"],
-                                        uh_e.function_space.element.interpolation_points
+                                    ion['init_e'],
+                                    uh_e.function_space.element.interpolation_points
                                     )
                                 )
 
@@ -314,33 +428,43 @@ def setup_variational_form():
         alpha_i_sum += Di * z**2 * uh_i     # Intracellular contribution
         alpha_e_sum += De * z**2 * uh_e # Extracellular contribution
 
-        # Update ion channel currents
+        # Calculate and update Nernst potential for current ion
+        ion['E'] = (psi/z) * ln(uh_i / uh_e)
+
+        # Set ion channel currents
         ion['I_ch'] = dict.fromkeys(interface_markers)
 
         for model in ionic_models:
             for interface_tag in model.tags:
                 ion['I_ch'][interface_tag] = model._eval(idx)     # Calculate channel current
+
+                if model.stimulus_tags is not None and interface_tag in model.stimulus_tags:
+                        if ion['name']=='Na' and model.__str__()=='Hodgkin-Huxley':
+                            ion['I_ch'][interface_tag] += model._add_stimulus()
+                
                 I_ch[interface_tag] += ion['I_ch'][interface_tag] # Add contribution to total channel current
 
-    if np.isclose(t.value, 0.0):
+    # Set initial conditions for the potentials
+    if isinstance(phi_i_init, dolfinx.fem.Constant):
+        uh_[num_ions].x.array[:] = phi_i_init.value
+    else:    
         uh_[num_ions].interpolate(dolfinx.fem.Expression(
-                                    exact_solutions_funcs["phi_i"],
+                                    phi_i_init,
                                     uh_[num_ions].function_space.element.interpolation_points
                                     )
                                 )
+    if isinstance(phi_e_init, dolfinx.fem.Constant):
+        uh_[2*num_ions+1].x.array[:] = phi_e_init.value
+    else:  
         uh_[2*num_ions+1].interpolate(dolfinx.fem.Expression(
-                                        exact_solutions_funcs["phi_e"],
+                                        phi_e_init,
                                         uh_[2*num_ions+1].function_space.element.interpolation_points
                                     )
                                 )
 
-    # Setup variational form
-    # The membrane trace contributions
-    a  = Cm/(faraday*dt) * (tr_phi_e - tr_phi_i) * tr_vphi_e * dGamma
-    a += Cm/(faraday*dt) * (tr_phi_i - tr_phi_e) * tr_vphi_i * dGamma
-    
-    # Initialize linear form
-    L = 0
+    # Setup bilinear and linear form   
+    # Initialize 
+    a = 0; L = 0
 
     # Ion specific parts
     for idx, ion in enumerate(ion_list):
@@ -391,89 +515,101 @@ def setup_variational_form():
         
         # Ion channel currents
         for interface_tag in interface_markers:
-            L -= (dt * I_ch_k[interface_tag] - alpha_i(i_res) * Cm * phi_m_) / (faraday*z) * vki(i_res) * dGamma(interface_tag)
-            L += (dt * I_ch_k[interface_tag] - alpha_e(e_res) * Cm * phi_m_) / (faraday*z) * vke(e_res) * dGamma(interface_tag)
+            L -= 1/(faraday*z) * (dt*I_ch_k[interface_tag] - alpha_i(i_res)*Cm*phi_m_) * vki(i_res) * dGamma(interface_tag)
+            L += 1/(faraday*z) * (dt*I_ch_k[interface_tag] - alpha_e(e_res)*Cm*phi_m_) * vke(e_res) * dGamma(interface_tag)
 
         # Source terms
         L += dt * inner(ion["f_i"], vki) * dxI
         L += dt * inner(ion["f_e"], vke) * dxE
-
-        ##------ MMS TERMS START ------##
-        # Concentration source terms
-        L += dt * inner(exact_source_terms[f"f_{ion['name']}_i"], vki) * dxI # Intracellular
-        L += dt * inner(exact_source_terms[f"f_{ion['name']}_e"], vke) * dxE # Extracellular
-
-        # Membrane current correction
-        L += dt/(faraday*z) * alpha_i(i_res) * inner(exact_source_terms[f"f_phi_{ion['name']}"], vki(i_res)) * dGamma
-        L -= dt/(faraday*z) * alpha_e(e_res) * inner(exact_source_terms[f"f_phi_{ion['name']}"], vke(e_res)) * dGamma
-        L -= dt/(faraday*z) * alpha_e(e_res) * inner(exact_source_terms["f_gamma"], vke(e_res)) * dGamma
-
-        # Exterior boundary fluxes
-        L -= dt * inner(dot(exact_source_terms[f"J_{ion['name']}_e"], n), vke) * ds
-        L += faraday*z * inner(dot(exact_source_terms[f"J_{ion['name']}_e"], n), vphi_e) * ds
-        ##------ MMS TERMS END ------##
             
     # Weak form - potential equations
-    a -= inner(J_phi_i, grad(vphi_i)) * dxI
-    a -= inner(J_phi_e, grad(vphi_e)) * dxE
+    a -= dt * inner(J_phi_i, grad(vphi_i)) * dxI
+    a -= dt * inner(J_phi_e, grad(vphi_e)) * dxE
+
+    # Trace terms
+    a += Cm/faraday * (tr_phi_i - tr_phi_e) * tr_vphi_i * dGamma
+    a += Cm/faraday * (tr_phi_e - tr_phi_i) * tr_vphi_e * dGamma
 
     # Membrane currents
     for interface_tag in interface_markers:
-        L += (1/faraday) * (I_ch[interface_tag] - Cm*phi_m_/dt) * (tr_vphi_e - tr_vphi_i) * dGamma(interface_tag)
-
-    ##------ MMS TERMS START ------##
-    # Potential source terms
-    L -= inner(exact_source_terms["f_phi_i"], vphi_i) * dxI # Intracellular
-    L -= inner(exact_source_terms["f_phi_e"], vphi_e) * dxE # Extracellular
-
-    # Membrane current correction
-    L += inner(exact_source_terms["f_phi_m"], tr_vphi_i) * dGamma
-    L -= inner(exact_source_terms["f_phi_m"], tr_vphi_e) * dGamma
-    L -= inner(exact_source_terms["f_gamma"], tr_vphi_e) * dGamma
-    ##------ MMS TERMS END ------##
+        L += (1/faraday) * (dt*I_ch[interface_tag] - Cm*phi_m_) * (tr_vphi_e - tr_vphi_i) * dGamma(interface_tag)
         
     a_compiled = dolfinx.fem.form(extract_blocks(a), entity_maps=entity_maps)
     L_compiled = dolfinx.fem.form(extract_blocks(L), entity_maps=entity_maps)
 
     return a_compiled, L_compiled
 
-a_compiled, L_compiled = setup_variational_form()
-bc_e_dofs = dolfinx.fem.locate_dofs_topological(
-    Ve, omega_e.topology.dim-1, sub_tag_e.find(boundary_marker)
-)
-bcs = []
+def setup_preconditioner_form():
 
-# BC for potential
-u_bc_e = dolfinx.fem.Function(Ve)
-bc_e = exact_solutions_funcs["phi_e"]
-u_bc_e.interpolate(dolfinx.fem.Expression(
-                    bc_e,
-                    u_bc_e.function_space.element.interpolation_points
+    # Initialize
+    J_phi_i = 0; J_phi_e = 0
+    P = 0
+
+    # Ion specific parts
+    for idx, ion in enumerate(ion_list):
+
+        # Get ion attributes
+        z  = ion['z']
+        Di = ion['Di']
+        De = ion['De']
+
+        # Set intracellular ion functions
+        ki  = u[idx]       # Trial function
+        vki = v[idx]       # Test function
+        ki_ = uh_[idx] # Previous solution
+
+        # Set extracellular ion functions
+        ke  = u[num_ions+1+idx]       # Trial function
+        vke = v[num_ions+1+idx]       # Test function
+        ke_ = uh_[num_ions+1+idx] # Previous solution
+
+        P += dt * inner(Di*grad(ki), grad(vki)) * dxI + ki*vki * dxI
+        P += dt * inner(De*grad(ke), grad(vke)) * dxE + ke*vke * dxE
+
+        # Ion fluxes
+        Ji =  - (Di*z/psi) * ki_ * grad(phi_i)
+        Je =  - (De*z/psi) * ke_ * grad(phi_e)
+
+        # Add contributions to total fluxes
+        J_phi_i += z*Ji
+        J_phi_e += z*Je
+
+    # Potential terms
+    P -= dt * inner(J_phi_i, grad(vphi_i)) * dxI + (Cm/faraday) * inner(tr_phi_i, tr_vphi_i) * dGamma
+    P -= dt * inner(J_phi_e, grad(vphi_e)) * dxE + (Cm/faraday) * inner(tr_phi_e, tr_vphi_e) * dGamma
+
+    P_compiled = dolfinx.fem.form(extract_blocks(P), entity_maps=entity_maps)
+
+    return P_compiled
+
+def get_error_forms(uh: list[dolfinx.fem.Function], uh_exact: list[Coefficient]) \
+    -> list[dolfinx.fem.Form]:
+    forms = []
+    for idx, sol in zip(range(len(uh)), uh):
+        exact_sol = uh_exact[names[idx]]
+        dx_error = dxI if idx <= 3 else dxE
+        error_L2 = inner(sol - exact_sol, sol - exact_sol) * dx_error
+        forms.append(dolfinx.fem.form(error_L2, entity_maps=entity_maps))
+    
+    return forms
+
+def calculate_errors(uh: list[dolfinx.fem.Function], uh_exact: list[Coefficient]):
+    error_forms = get_error_forms(uh, uh_exact)
+    for error_form, name in zip(error_forms, names):
+        error = np.sqrt(
+                    mesh.comm.allreduce(
+                        dolfinx.fem.assemble_scalar(error_form),
+                        op=MPI.SUM
+                    )
                 )
-            )
-# BCs for concentrations
-for idx, ion in enumerate(ion_list):
-    exact_func = exact_solutions_funcs[ion["name"]+"_e"]
-    func = dolfinx.fem.Function(Ve)
-    func.interpolate(dolfinx.fem.Expression(
-                    exact_func,
-                    Ve.element.interpolation_points
-                )
-            )
-    bc   = dolfinx.fem.dirichletbc(func, bc_e_dofs)
-    bcs.append(bc)
-
-bcs.append(dolfinx.fem.dirichletbc(u_bc_e, bc_e_dofs))
-
-A = dolfinx.fem.petsc.create_matrix(a_compiled, kind="mpi")
-b = dolfinx.fem.petsc.create_vector(L_compiled, kind="mpi")
+        print(f"L2 error {name} = {error:.2e}")
 
 def assemble_system():
     """ Assemble linear system matrix, right-hand side vector, and
         apply boundary conditions.
     """
     A.zeroEntries()
-    dolfinx.fem.petsc.assemble_matrix_mat(A, a_compiled, bcs=bcs)
+    dolfinx.fem.petsc.assemble_matrix(A, a_compiled, bcs=bcs)
     A.assemble()
     with b.localForm() as loc: loc.set(0.0)
     dolfinx.fem.petsc.assemble_vector(b, L_compiled)
@@ -485,29 +621,72 @@ def assemble_system():
     bcs0 = dolfinx.fem.bcs_by_block(dolfinx.fem.extract_function_spaces(L_compiled), bcs)
     dolfinx.fem.petsc.set_bc(b, bcs0)
 
-# P  = sigma_e * inner(grad(phi_e), grad(vphi_e)) * dxE
-# P += sigma_i * inner(grad(phi_i), grad(vphi_i)) * dxI
-# P += inner(phi_i, vphi_i) * dxI
-# P_compiled = dolfinx.fem.form(extract_blocks(P), entity_maps=entity_maps)
-# bc_P = dolfinx.fem.dirichletbc(0.0, bc_dofs, Ve)
-# B = dolfinx.fem.petsc.assemble_matrix(P_compiled, kind="mpi", bcs=[bc_P])
-# B.assemble()
+#----- Variational form and BCs -----#
+a_compiled, L_compiled = setup_variational_form()
+
+bc_e_dofs = dolfinx.fem.locate_dofs_topological(
+    Ve, omega_e.topology.dim-1, sub_tag_e.find(boundary_marker)
+)
+bcs = []
+
+# BC for potential
+u_bc_e = dolfinx.fem.Function(exterior_spaces[-1])
+# u_bc_e.interpolate(dolfinx.fem.Expression(
+#                     phi_e_exact,
+#                     Ve.element.interpolation_points
+#                 )
+#             )
+bcs.append(dolfinx.fem.dirichletbc(u_bc_e, bc_e_dofs))
+
+# BCs for concentrations
+for idx, ion in enumerate(ion_list):
+    # exact_func = exact_solutions_funcs[ion["name"]+"_e"]
+    func = dolfinx.fem.Function(exterior_spaces[idx])
+    # func.interpolate(dolfinx.fem.Expression(
+    #                 exact_func,
+    #                 Ve.element.interpolation_points
+    #             )
+    #         )
+    bc   = dolfinx.fem.dirichletbc(func, bc_e_dofs)
+    bcs.append(bc)
+
+#----- Solver setup -----#
+A = dolfinx.fem.petsc.create_matrix(a_compiled, kind="mpi") # System matrix
+b = dolfinx.fem.petsc.create_vector(L_compiled, kind="mpi") # RHS vector
+x = b.duplicate() # Solution vector
 
 ksp = PETSc.KSP().create(mesh.comm)
-ksp.setOperators(A)#, B)
-ksp.setType("preonly")
-ksp.getPC().setType("lu")
-ksp.getPC().setFactorSolverType("mumps")
-opts = PETSc.Options()
-opts["mat_mumps_icntl_14"] = 80  # Increase MUMPS working memory
-opts["mat_mumps_icntl_24"] = 1  # Option to support solving a singular matrix (pressure nullspace)
-opts["mat_mumps_icntl_25"] = 0  # Option to support solving a singular matrix (pressure nullspace)
+
+use_direct_solver = False
+if use_direct_solver:
+    # Configure PETSc solver: direct solver using MUMPS
+    ksp.setOperators(A)
+    ksp.setType("preonly")
+    ksp.getPC().setType("lu")
+    ksp.getPC().setFactorSolverType("mumps")
+else:
+    # Assemble preconditioner matrix
+    P_compiled = setup_preconditioner_form()
+    B = dolfinx.fem.petsc.assemble_matrix(P_compiled, kind="mpi", bcs=bcs)
+    B.assemble()
+
+    # Configure PETSc solver: iterative solver using GMRES with Hypre
+    ksp.setOperators(A, B)
+    ksp.setType("gmres")
+    ksp.getPC().setType("hypre")
+    ksp.getPC().setFactorSolverType("mumps")
+    ksp.setTolerances(1.0e-7)
+    ksp.setNormType(PETSc.KSP.NormType.NORM_PRECONDITIONED)
+
+    opts = PETSc.Options()
+    opts.setValue("ksp_max_it", 1000)
+    opts.setValue("ksp_initial_guess_nonzero", True)
+    opts.setValue("pc_hypre_boomeramg_max_iter", 1)
+    if mesh.geometry.dim==3: opts.setValue("pc_hypre_boomeramg_strong_threshold", 0.5)
+
+ksp.setMonitor(lambda ksp, its, rnorm: print(f"Iteration: {its}, residual: {rnorm}"))
+ksp.setErrorIfNotConverged(True)
 ksp.setFromOptions()
-# ksp.setTolerances(1e-12, 1e-12)
-# ksp.setMonitor(lambda ksp, its, rnorm: print(f"Iteration: {its}, residual: {rnorm}"))
-# ksp.setNormType(PETSc.KSP.NormType.NORM_PRECONDITIONED)
-# ksp.setErrorIfNotConverged(True)
-x = b.duplicate()
 
 # Prepare output
 comm = MPI.COMM_WORLD
@@ -517,74 +696,25 @@ bp_names = ["Na_i.bp", "K_i.bp", "Cl_i.bp", "phi_i.bp",
 bps = [dolfinx.io.VTXWriter(comm, bp_names[i], [uh_[i]], engine="BP5") for i in range(len(uh_))]
 [bp.write(t) for bp in bps]
 
-phi_i_exact = exact_solutions_funcs["phi_i"]
-phi_e_exact = exact_solutions_funcs["phi_e"]
-error_ui = dolfinx.fem.form(
-    inner(phi_i_ - phi_i_exact, phi_i_ - phi_i_exact) * dxI, entity_maps=entity_maps
-)
-error_ue = dolfinx.fem.form(
-    inner(phi_e_ - phi_e_exact, phi_e_ - phi_e_exact) * dxE, entity_maps=entity_maps
-)
-local_ui = dolfinx.fem.assemble_scalar(error_ui)
-local_ue = dolfinx.fem.assemble_scalar(error_ue)
-global_ui = np.sqrt(mesh.comm.allreduce(local_ui, op=MPI.SUM))
-global_ue = np.sqrt(mesh.comm.allreduce(local_ue, op=MPI.SUM))
-print(f"L2(ui): {global_ui:.2e}\nL2(ue): {global_ue:.2e}")
+for _ in range(num_timesteps):
+    # Increment time
+    t.value += dt.value 
+    print(f"Time = {t.value}")
 
-phi_i_exact_func = dolfinx.fem.Function(Vi)
-phi_e_exact_func = dolfinx.fem.Function(Ve)
-phi_i_expr = dolfinx.fem.Expression(phi_i_exact, Vi.element.interpolation_points)
-phi_e_expr = dolfinx.fem.Expression(phi_e_exact, Ve.element.interpolation_points)
-phi_i_exact_func.interpolate(phi_i_expr)
-phi_e_exact_func.interpolate(phi_e_expr)
-vtx1 = dolfinx.io.VTXWriter(comm, "phi_i_exact.bp", [phi_i_exact_func], "BP5")
-vtx2 = dolfinx.io.VTXWriter(comm, "phi_e_exact.bp", [phi_e_exact_func], "BP5")
-vtx1.write(t)
-vtx2.write(t)
+    # Update gating variables
+    hodgin_huxley_model.update_gating_variables()
 
-# for _ in range(num_timesteps):
-t.value += dt.value # Increment time
-print(f"Time = {t.value}")
+    # Assemble system
+    assemble_system()
 
-# Setup variational form and assemble system
-assemble_system()
+    # Solve and update
+    ksp.solve(b, x)
+    print(f"Solver converged in: {ksp.getIterationNumber()} with reason {ksp.getConvergedReason()}")
+    x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
+    dolfinx.fem.petsc.assign(x, uh_)
 
-# Solve and update
-ksp.solve(b, x)
-x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-dolfinx.fem.petsc.assign(x, uh_)
+    # Write output
+    [bp.write(t) for bp in bps]
 
-phi_i_.x.array[:] = uh_[num_ions].x.array.copy()
-phi_e_.x.array[:] = uh_[2*num_ions+1].x.array.copy()
-
-num_iterations = ksp.getIterationNumber()
-converged_reason = ksp.getConvergedReason()
-print(f"Solver converged in: {num_iterations} with reason {converged_reason}")
-
-[bp.write(t) for bp in bps]
-
+# Close output files
 [bp.close() for bp in bps]
-
-error_ui = dolfinx.fem.form(
-    inner(phi_i_ - phi_i_exact, phi_i_ - phi_i_exact) * dxI, entity_maps=entity_maps
-)
-error_ue = dolfinx.fem.form(
-    inner(phi_e_ - phi_e_exact, phi_e_ - phi_e_exact) * dxE, entity_maps=entity_maps
-)
-
-local_ui = dolfinx.fem.assemble_scalar(error_ui)
-local_ue = dolfinx.fem.assemble_scalar(error_ue)
-global_ui = np.sqrt(mesh.comm.allreduce(local_ui, op=MPI.SUM))
-global_ue = np.sqrt(mesh.comm.allreduce(local_ue, op=MPI.SUM))
-print(f"L2(ui): {global_ui:.2e}\nL2(ue): {global_ue:.2e}")
-
-
-phi_i_expr = dolfinx.fem.Expression(phi_i_exact, Vi.element.interpolation_points)
-phi_e_expr = dolfinx.fem.Expression(phi_e_exact, Ve.element.interpolation_points)
-phi_i_exact_func.interpolate(phi_i_expr)
-phi_e_exact_func.interpolate(phi_e_expr)
-vtx1.write(t)
-vtx2.write(t)
-
-vtx1.close()
-vtx2.close()

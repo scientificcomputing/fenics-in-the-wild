@@ -204,10 +204,7 @@ spaces = (interior_spaces+exterior_spaces)
 W = MixedFunctionSpace(*spaces)
 u = TrialFunctions(W)
 v = TestFunctions(W)
-
 uh_ = [dolfinx.fem.Function(space) for space in spaces] # Previous timestep functions
-phi_i_ = dolfinx.fem.Function(Vi)
-phi_e_ = dolfinx.fem.Function(Ve)
 
 # Extract potential functions
 phi_i  = u[num_ions] # Intracellular trial function
@@ -568,7 +565,6 @@ bp_names = ["Na_i.bp", "K_i.bp", "Cl_i.bp", "phi_i.bp",
         ]
 bps = [dolfinx.io.VTXWriter(comm, bp_names[i], [uh_[i]], engine="BP5") for i in range(len(uh_))]
 [bp.write(t) for bp in bps]
-
 
 # Increment time and assemble system
 t.value += dt.value 
