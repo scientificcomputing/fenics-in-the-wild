@@ -442,8 +442,6 @@ def setup_preconditioner_form():
         # Ion fluxes
         Ji =  - (Di*z/psi) * ki_ * grad(phi_i)
         Je =  - (De*z/psi) * ke_ * grad(phi_e)
-        # Ji = -Di * grad(ki) - (Di*z/psi) * ki_ * grad(phi_i)
-        # Je = -De * grad(ke) - (De*z/psi) * ke_ * grad(phi_e)
 
         # Add contributions to total fluxes
         J_phi_i += z*Ji
@@ -553,8 +551,15 @@ else:
     ksp.setTolerances(1.0e-7)
     ksp.setNormType(PETSc.KSP.NormType.NORM_PRECONDITIONED)
 
+    opts = PETSc.Options()
+    opts.setValue("ksp_max_it", 1000)
+    opts.setValue("ksp_initial_guess_nonzero", True)
+    opts.setValue("pc_hypre_boomeramg_max_iter", 1)
+    if mesh.geometry.dim==3: opts.setValue("pc_hypre_boomeramg_strong_threshold", 0.5)
+
 ksp.setMonitor(lambda ksp, its, rnorm: print(f"Iteration: {its}, residual: {rnorm}"))
 ksp.setErrorIfNotConverged(True)
+ksp.setFromOptions()
 
 # Prepare output
 comm = MPI.COMM_WORLD
@@ -564,23 +569,21 @@ bp_names = ["Na_i.bp", "K_i.bp", "Cl_i.bp", "phi_i.bp",
 bps = [dolfinx.io.VTXWriter(comm, bp_names[i], [uh_[i]], engine="BP5") for i in range(len(uh_))]
 [bp.write(t) for bp in bps]
 
-t.value += dt.value # Increment time
-print(f"Time = {t.value}")
 
-# Setup variational form and assemble system
+# Increment time and assemble system
+t.value += dt.value 
+print(f"Time = {t.value}")
 assemble_system()
 
 # Solve and update
 ksp.solve(b, x)
+print(f"Solver converged in: {ksp.getIterationNumber()} with reason {ksp.getConvergedReason()}")
 x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
 dolfinx.fem.petsc.assign(x, uh_)
 
 # Calculate errors
 calculate_errors(uh_, exact_solutions_funcs)
 
-num_iterations = ksp.getIterationNumber()
-converged_reason = ksp.getConvergedReason()
-print(f"Solver converged in: {num_iterations} with reason {converged_reason}")
-
+# Write output and close files
 [bp.write(t) for bp in bps]
 [bp.close() for bp in bps]
