@@ -47,6 +47,9 @@ class ExactSolutionsKNPEMI:
         # potentials
         phi_i_exact = cos(2*pi * x) * cos(2*pi * y) * (1 + exp(-t))
         phi_e_exact = cos(2*pi * x) * cos(2*pi * y)
+
+        phi_i_init = cos(2*pi * x) * cos(2*pi * y)
+        phi_e_init = cos(2*pi * x) * cos(2*pi * y)
         
         exact_solutions = {"Na_i"  : Na_i_exact,
                            "K_i"   : K_i_exact,
@@ -55,7 +58,9 @@ class ExactSolutionsKNPEMI:
                            "Na_e"  : Na_e_exact,
                            "K_e"   : K_e_exact,
                            "Cl_e"  : Cl_e_exact,
-                           "phi_e" : phi_e_exact
+                           "phi_e" : phi_e_exact,
+                           "phi_i_init" : phi_i_init,
+                           "phi_e_init" : phi_e_init
         }
 
         return exact_solutions
@@ -112,7 +117,6 @@ class ExactSolutionsKNPEMI:
         Ich = Ich_Na + Ich_K + Ich_Cl
 
         i_res = "+"
-        e_res = "-"
         # Equation for the membrane potential source term: f = Cm*d(phi_m)/dt - (Im - Ich) 
         # where we choose Im = F * sum_k(z^k * dot(J_i_k, n_i)) = total_flux_intra
         f_phi_Na = diff(phi_m_exact, t) + Ich_Na - Im_intra(i_res)

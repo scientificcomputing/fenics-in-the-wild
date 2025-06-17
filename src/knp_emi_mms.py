@@ -12,7 +12,8 @@ from ufl import (
     extract_blocks,
     Measure,
     dot,
-    Coefficient
+    Coefficient,
+    ZeroBaseForm
 )
 import numpy as np
 import numpy.typing as npt
@@ -34,8 +35,7 @@ def interior_marker_function(x, tol=1e-12):
         & upper_bound(x, 0, x_U)
         & upper_bound(x, 1, y_U)
     )
-
-
+    
 # Steps to set up submeshes and interface
 M = int(argv[1])
 mesh = dolfinx.mesh.create_unit_square(
@@ -194,7 +194,7 @@ chloride = {"Di" : dolfinx.fem.Constant(mesh, 1.0), # Intracellular diffusion co
 }
 ion_list = [sodium, potassium, chloride]
 num_ions = len(ion_list)
-
+names = ["Na_i", "K_i", "Cl_i", "phi_i", "Na_e", "K_e", "Cl_e", "phi_e"]
 interior_spaces = [Vi.clone() for _ in range(num_ions+1)]
 exterior_spaces = [Ve.clone() for _ in range(num_ions+1)]
 spaces = (interior_spaces+exterior_spaces)
@@ -211,6 +211,7 @@ phi_i  = u[num_ions] # Intracellular trial function
 vphi_i = v[num_ions] # Intracellular test  function
 phi_e  = u[-1] # Extracellular trial function
 vphi_e = v[-1] # Extracellular test  function
+
 # Define traces
 i_res = "+"
 e_res = "-"
@@ -221,7 +222,7 @@ tr_vphi_e = vphi_e(e_res)
 
 # Constants
 t = dolfinx.fem.Constant(mesh, 0.0) # Time
-timestep = 1.0e-5#t_end - t
+timestep = 1.0e-5
 t_end = timestep 
 dt = dolfinx.fem.Constant(mesh, timestep)
 
@@ -230,7 +231,7 @@ exact_solutions = ExactSolutionsKNPEMI(mesh, t)
 exact_solutions_funcs, exact_source_terms = exact_solutions.get_mms_terms()
 phi_i_exact = exact_solutions_funcs["phi_i"]
 phi_e_exact = exact_solutions_funcs["phi_e"]
-phi_m_ = phi_i_exact - phi_e_exact
+phi_m_ = exact_solutions_funcs["phi_i_init"] - exact_solutions_funcs["phi_e_init"]
 
 # Set constants
 gas_const = temp = 1.0
@@ -251,7 +252,6 @@ class Passive(object):
         return phi_m_
 passive_model = Passive()
 ionic_models = [passive_model]
-
 
 def setup_variational_form():
 
@@ -409,6 +409,91 @@ def setup_variational_form():
 
     return a_compiled, L_compiled
 
+def setup_preconditioner_form():
+
+    # Initialize
+    J_phi_i = 0; J_phi_e = 0
+    P = 0
+
+    # Ion specific parts
+    for idx, ion in enumerate(ion_list):
+
+        # Get ion attributes
+        z  = ion['z']
+        Di = ion['Di']
+        De = ion['De']
+
+        # Set intracellular ion functions
+        ki  = u[idx]       # Trial function
+        vki = v[idx]       # Test function
+        ki_ = uh_[idx] # Previous solution
+
+        # Set extracellular ion functions
+        ke  = u[num_ions+1+idx]       # Trial function
+        vke = v[num_ions+1+idx]       # Test function
+        ke_ = uh_[num_ions+1+idx] # Previous solution
+
+        P += dt * inner(Di*grad(ki), grad(vki)) * dxI + ki*vki * dxI
+        P += dt * inner(De*grad(ke), grad(vke)) * dxE + ke*vke * dxE
+
+        # Ion fluxes
+        Ji =  - (Di*z/psi) * ki_ * grad(phi_i)
+        Je =  - (De*z/psi) * ke_ * grad(phi_e)
+        # Ji = -Di * grad(ki) - (Di*z/psi) * ki_ * grad(phi_i)
+        # Je = -De * grad(ke) - (De*z/psi) * ke_ * grad(phi_e)
+
+        # Add contributions to total fluxes
+        J_phi_i += z*Ji
+        J_phi_e += z*Je
+
+    # Potential terms
+    P -= dt * inner(J_phi_i, grad(vphi_i)) * dxI + (Cm/faraday) * inner(tr_phi_i, tr_vphi_i) * dGamma
+    P -= dt * inner(J_phi_e, grad(vphi_e)) * dxE + (Cm/faraday) * inner(tr_phi_e, tr_vphi_e) * dGamma
+
+    P_compiled = dolfinx.fem.form(extract_blocks(P), entity_maps=entity_maps)
+
+    return P_compiled
+
+def get_error_forms(uh: list[dolfinx.fem.Function], uh_exact: list[Coefficient]) \
+    -> list[dolfinx.fem.Form]:
+    forms = []
+    for idx, sol in zip(range(len(uh)), uh):
+        exact_sol = uh_exact[names[idx]]
+        dx_error = dxI if idx <= 3 else dxE
+        error_L2 = inner(sol - exact_sol, sol - exact_sol) * dx_error
+        forms.append(dolfinx.fem.form(error_L2, entity_maps=entity_maps))
+    
+    return forms
+
+def calculate_errors(uh: list[dolfinx.fem.Function], uh_exact: list[Coefficient]):
+    error_forms = get_error_forms(uh, uh_exact)
+    for error_form, name in zip(error_forms, names):
+        error = np.sqrt(
+                    mesh.comm.allreduce(
+                        dolfinx.fem.assemble_scalar(error_form),
+                        op=MPI.SUM
+                    )
+                )
+        print(f"L2 error {name} = {error:.2e}")
+
+def assemble_system():
+    """ Assemble linear system matrix, right-hand side vector, and
+        apply boundary conditions.
+    """
+    A.zeroEntries()
+    dolfinx.fem.petsc.assemble_matrix(A, a_compiled, bcs=bcs)
+    A.assemble()
+    with b.localForm() as loc: loc.set(0.0)
+    dolfinx.fem.petsc.assemble_vector(b, L_compiled)
+    bcs1 = dolfinx.fem.bcs_by_block(
+        dolfinx.fem.extract_function_spaces(a_compiled, 1), bcs
+    )
+    dolfinx.fem.petsc.apply_lifting(b, a_compiled, bcs=bcs1)
+    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+    bcs0 = dolfinx.fem.bcs_by_block(dolfinx.fem.extract_function_spaces(L_compiled), bcs)
+    dolfinx.fem.petsc.set_bc(b, bcs0)
+
+#----- Variational form and BCs -----#
 a_compiled, L_compiled = setup_variational_form()
 
 bc_e_dofs = dolfinx.fem.locate_dofs_topological(
@@ -437,74 +522,35 @@ for idx, ion in enumerate(ion_list):
     bc   = dolfinx.fem.dirichletbc(func, bc_e_dofs)
     bcs.append(bc)
 
-A = dolfinx.fem.petsc.create_matrix(a_compiled, kind="mpi")
-b = dolfinx.fem.petsc.create_vector(L_compiled, kind="mpi")
-
-u_bc_vtx = dolfinx.io.VTXWriter(mesh.comm, "bc_check.bp", [u_bc_e], "BP5")
-u_bc_vtx.write(t)
-
-names = ["Na_i", "K_i", "Cl_i", "phi_i", "Na_e", "K_e", "Cl_e", "phi_e"]
-def get_error_forms(uh: list[dolfinx.fem.Function], uh_exact: list[Coefficient]) \
-    -> list[dolfinx.fem.Form]:
-    forms = []
-    for idx, sol in zip(range(len(uh)), uh):
-        exact_sol = uh_exact[names[idx]]
-        dx_error = dxI if idx <= 3 else dxE
-        error_L2 = inner(sol - exact_sol, sol - exact_sol) * dx_error
-        forms.append(dolfinx.fem.form(error_L2, entity_maps=entity_maps))
-    
-    return forms
-
-def calculate_errors(error_forms: list[dolfinx.fem.Form]):
-    for error_form, name in zip(error_forms, names):
-        error = np.sqrt(
-                    mesh.comm.allreduce(
-                        dolfinx.fem.assemble_scalar(error_form),
-                        op=MPI.SUM
-                    )
-                )
-        print(f"L2 error {name} = {error:.2e}")
-
-def assemble_system():
-    """ Assemble linear system matrix, right-hand side vector, and
-        apply boundary conditions.
-    """
-    A.zeroEntries()
-    dolfinx.fem.petsc.assemble_matrix(A, a_compiled, bcs=bcs)
-    A.assemble()
-    with b.localForm() as loc: loc.set(0.0)
-    dolfinx.fem.petsc.assemble_vector(b, L_compiled)
-    bcs1 = dolfinx.fem.bcs_by_block(
-        dolfinx.fem.extract_function_spaces(a_compiled, 1), bcs
-    )
-    dolfinx.fem.petsc.apply_lifting(b, a_compiled, bcs=bcs1)
-    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-    bcs0 = dolfinx.fem.bcs_by_block(dolfinx.fem.extract_function_spaces(L_compiled), bcs)
-    dolfinx.fem.petsc.set_bc(b, bcs0)
-
-# P  = sigma_e * inner(grad(phi_e), grad(vphi_e)) * dxE
-# P += sigma_i * inner(grad(phi_i), grad(vphi_i)) * dxI
-# P += inner(phi_i, vphi_i) * dxI
-# P_compiled = dolfinx.fem.form(extract_blocks(P), entity_maps=entity_maps)
-# bc_P = dolfinx.fem.dirichletbc(0.0, bc_dofs, Ve)
-# B = dolfinx.fem.petsc.assemble_matrix(P_compiled, kind="mpi", bcs=[bc_P])
-# B.assemble()
+#----- Solver setup -----#
+A = dolfinx.fem.petsc.create_matrix(a_compiled, kind="mpi") # System matrix
+b = dolfinx.fem.petsc.create_vector(L_compiled, kind="mpi") # RHS vector
+x = b.duplicate() # Solution vector
 
 ksp = PETSc.KSP().create(mesh.comm)
-ksp.setOperators(A)#, B)
-ksp.setType("preonly")
-ksp.getPC().setType("lu")
-ksp.getPC().setFactorSolverType("mumps")
-opts = PETSc.Options()
-opts["mat_mumps_icntl_14"] = 80  # Increase MUMPS working memory
-opts["mat_mumps_icntl_24"] = 1  # Option to support solving a singular matrix (pressure nullspace)
-opts["mat_mumps_icntl_25"] = 0  # Option to support solving a singular matrix (pressure nullspace)
-ksp.setFromOptions()
-# ksp.setTolerances(1e-12, 1e-12)
-# ksp.setMonitor(lambda ksp, its, rnorm: print(f"Iteration: {its}, residual: {rnorm}"))
-# ksp.setNormType(PETSc.KSP.NormType.NORM_PRECONDITIONED)
-# ksp.setErrorIfNotConverged(True)
-x = b.duplicate()
+use_iterative_solver = True
+if use_iterative_solver:
+    # Assemble preconditioner matrix
+    P_compiled = setup_preconditioner_form()
+    B = dolfinx.fem.petsc.assemble_matrix(P_compiled, kind="mpi", bcs=bcs)
+    B.assemble()
+
+    # Configure PETSc solver: iterative solver using GMRES with Hypre
+    ksp.setOperators(A, B)
+    ksp.setType("gmres")
+    ksp.getPC().setType("hypre")
+    ksp.getPC().setFactorSolverType("mumps")
+    ksp.setTolerances(1.0e-7)
+    ksp.setNormType(PETSc.KSP.NormType.NORM_PRECONDITIONED)
+else:
+    # Configure PETSc solver: direct solver using MUMPS
+    ksp.setOperators(A)
+    ksp.setType("preonly")
+    ksp.getPC().setType("lu")
+    ksp.getPC().setFactorSolverType("mumps")
+
+ksp.setMonitor(lambda ksp, its, rnorm: print(f"Iteration: {its}, residual: {rnorm}"))
+ksp.setErrorIfNotConverged(True)
 
 # Prepare output
 comm = MPI.COMM_WORLD
@@ -514,21 +560,19 @@ bp_names = ["Na_i.bp", "K_i.bp", "Cl_i.bp", "phi_i.bp",
 bps = [dolfinx.io.VTXWriter(comm, bp_names[i], [uh_[i]], engine="BP5") for i in range(len(uh_))]
 [bp.write(t) for bp in bps]
 
-
 t.value += dt.value # Increment time
 print(f"Time = {t.value}")
 
 # Setup variational form and assemble system
 assemble_system()
-u_bc_vtx.write(t)
 
 # Solve and update
 ksp.solve(b, x)
 x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
 dolfinx.fem.petsc.assign(x, uh_)
 
-error_forms = get_error_forms(uh_, exact_solutions_funcs)
-calculate_errors(error_forms)
+# Calculate errors
+calculate_errors(uh_, exact_solutions_funcs)
 
 num_iterations = ksp.getIterationNumber()
 converged_reason = ksp.getConvergedReason()
@@ -536,18 +580,3 @@ print(f"Solver converged in: {num_iterations} with reason {converged_reason}")
 
 [bp.write(t) for bp in bps]
 [bp.close() for bp in bps]
-
-
-
-z = dolfinx.fem.petsc.create_vector(L_compiled, kind="mpi")
-with z.localForm() as loc: loc.set(0.0)
-bcs1 = dolfinx.fem.bcs_by_block(
-    dolfinx.fem.extract_function_spaces(a_compiled, 1), bcs
-)
-bcs0 = dolfinx.fem.bcs_by_block(dolfinx.fem.extract_function_spaces(L_compiled), bcs)
-dolfinx.fem.petsc.set_bc(z, bcs0)
-zh_ = [dolfinx.fem.Function(space) for space in spaces] # Previous timestep functions
-dolfinx.fem.petsc.assign(z, zh_)
-with dolfinx.io.XDMFFile(mesh.comm, "check.xdmf", "w") as xdmf:
-    xdmf.write_mesh(omega_e)
-    xdmf.write_function(zh_[-1])
