@@ -7,6 +7,8 @@ from ufl import (
     grad,
     TestFunctions,
     TrialFunctions,
+    TestFunction,
+    TrialFunction,
     FacetNormal,
     MixedFunctionSpace,
     extract_blocks,
@@ -18,6 +20,7 @@ from ufl import (
 import numpy as np
 import numpy.typing as npt
 import scifem
+import matplotlib.pyplot as plt
 from packaging.version import Version
 
 x_L = 0.25
@@ -170,9 +173,6 @@ dGamma = Measure(
 
 interface_markers = (interface_marker,)
 
-def project_onto_membrane(u: dolfinx.fem.Function):
-    return None
-
 # Functions spaces
 element = ("Lagrange", 1)
 V  = dolfinx.fem.functionspace(mesh, element)
@@ -248,7 +248,7 @@ sigma_e_val = 2.0
 sigma_i_val = 1.0
 timestep  = 1e-1
 t_end = 1.0
-phi_m_ = dolfinx.fem.Constant(mesh, 0.0)#project_onto_membrane(phi_i_ - phi_e_)
+phi_m_ = dolfinx.fem.Function(V)
 
 sigma_e = dolfinx.fem.Constant(omega_e, dolfinx.default_scalar_type(sigma_e_val))
 sigma_i = dolfinx.fem.Constant(omega_i, dolfinx.default_scalar_type(sigma_i_val))
@@ -340,7 +340,8 @@ class HodginHuxley(object):
         return I_ch
     
     def g_syn(self):
-        return self.g_syn_bar * exp(-np.mod(t.value, 0.01) / self.a_syn)
+        condition = lambda t: dolfinx.default_scalar_type(1 if float(t) % 0.2 else 0)
+        return self.g_syn_bar * exp(-condition(t) / self.a_syn)
 
     def _add_stimulus(self):
         """ Evaluate and return the stimulus part of the channel current for the Sodium ion. """
@@ -353,7 +354,8 @@ class HodginHuxley(object):
 
         dt_ode = dt.value / self.time_steps_ODE # ODE timestep size
 
-        V_M = 1000 * (phi_m_.value - phi_rest.value) # Convert membrane potential to mV
+        V_M = 1000 * (phi_m_.x.array - phi_rest.value) # Convert membrane potential to mV
+        print("V_M = ", V_M)
 
         alpha_n = 0.01e3 * (10.0 - V_M) / (np.exp((10.0 - V_M) / 10.0) - 1.0)
         beta_n = 0.125e3 * np.exp(-V_M / 80.0)
@@ -375,13 +377,9 @@ class HodginHuxley(object):
         y_exp_h = np.exp(-dt_ode / tau_y_h)
 
         for _ in range(self.time_steps_ODE):
-            # Get vector entries local to process + ghosts
-            with self.n.x.petsc_vec.localForm() as loc_n, \
-                 self.m.x.petsc_vec.localForm() as loc_m, \
-                 self.h.x.petsc_vec.localForm() as loc_h:
-                loc_n[:] = y_inf_n + (loc_n[:] - y_inf_n) * y_exp_n
-                loc_m[:] = y_inf_m + (loc_m[:] - y_inf_m) * y_exp_m
-                loc_h[:] = y_inf_h + (loc_h[:] - y_inf_h) * y_exp_h
+            self.n.x.array[:] = y_inf_n + (self.n.x.array.copy() - y_inf_n) * y_exp_n
+            self.m.x.array[:] = y_inf_m + (self.m.x.array.copy() - y_inf_m) * y_exp_m
+            self.h.x.array[:] = y_inf_h + (self.h.x.array.copy() - y_inf_h) * y_exp_h
 
 passive_model = Passive()
 hodgin_huxley_model = HodginHuxley()
@@ -582,28 +580,6 @@ def setup_preconditioner_form():
 
     return P_compiled
 
-def get_error_forms(uh: list[dolfinx.fem.Function], uh_exact: list[Coefficient]) \
-    -> list[dolfinx.fem.Form]:
-    forms = []
-    for idx, sol in zip(range(len(uh)), uh):
-        exact_sol = uh_exact[names[idx]]
-        dx_error = dxI if idx <= 3 else dxE
-        error_L2 = inner(sol - exact_sol, sol - exact_sol) * dx_error
-        forms.append(dolfinx.fem.form(error_L2, entity_maps=entity_maps))
-    
-    return forms
-
-def calculate_errors(uh: list[dolfinx.fem.Function], uh_exact: list[Coefficient]):
-    error_forms = get_error_forms(uh, uh_exact)
-    for error_form, name in zip(error_forms, names):
-        error = np.sqrt(
-                    mesh.comm.allreduce(
-                        dolfinx.fem.assemble_scalar(error_form),
-                        op=MPI.SUM
-                    )
-                )
-        print(f"L2 error {name} = {error:.2e}")
-
 def assemble_system():
     """ Assemble linear system matrix, right-hand side vector, and
         apply boundary conditions.
@@ -620,6 +596,28 @@ def assemble_system():
     b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
     bcs0 = dolfinx.fem.bcs_by_block(dolfinx.fem.extract_function_spaces(L_compiled), bcs)
     dolfinx.fem.petsc.set_bc(b, bcs0)
+
+def get_point_and_cell_on_interface():
+    x = np.array([0.25, 0.5, 0.0])
+    bb_tree = dolfinx.geometry.bb_tree(mesh, mesh.topology.dim)
+    cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, x)
+    colliding_cells = dolfinx.geometry.compute_colliding_cells(mesh, cell_candidates, x)
+    cc = colliding_cells.links(0)[0]
+    
+    return x, cc
+
+def setup_projection_problem(phi_m: dolfinx.fem.Function, phi_diff: dolfinx.fem.Function):
+    V = phi_m.function_space
+    dx = Measure('dx', domain=V.mesh)
+    eta, zeta = TrialFunction(V), TestFunction(V)
+    a = inner(eta, zeta) * dx
+    L = inner(phi_diff, zeta) * dx
+    a_compiled = dolfinx.fem.form(a, entity_maps=entity_maps)
+    L_compiled = dolfinx.fem.form(L, entity_maps=entity_maps)
+
+    return dolfinx.fem.petsc.LinearProblem(a_compiled, L_compiled, bcs=[], u=phi_m)
+
+projection_problem = setup_projection_problem(phi_m_, phi_i_(i_res)-phi_e_(i_res))
 
 #----- Variational form and BCs -----#
 a_compiled, L_compiled = setup_variational_form()
@@ -695,10 +693,17 @@ bp_names = ["Na_i.bp", "K_i.bp", "Cl_i.bp", "phi_i.bp",
         ]
 bps = [dolfinx.io.VTXWriter(comm, bp_names[i], [uh_[i]], engine="BP5") for i in range(len(uh_))]
 [bp.write(t) for bp in bps]
+times = [0.0]
+
+point, cell = get_point_and_cell_on_interface()
+projection_problem.solve()
+Vm = [phi_m_.eval(point, cell)]
+print(Vm)
 
 for _ in range(num_timesteps):
     # Increment time
     t.value += dt.value 
+    times.append(t.value)
     print(f"Time = {t.value}")
 
     # Update gating variables
@@ -713,8 +718,19 @@ for _ in range(num_timesteps):
     x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
     dolfinx.fem.petsc.assign(x, uh_)
 
+    # Update membrane potential
+    projection_problem.solve()
+    Vm.append(phi_m_.eval(point, cell))
+
     # Write output
     [bp.write(t) for bp in bps]
 
 # Close output files
 [bp.close() for bp in bps]
+
+# Plot membrane potential
+Vm = np.array(Vm)
+times = np.array(times)
+
+plt.plot(times, Vm)
+plt.show()
