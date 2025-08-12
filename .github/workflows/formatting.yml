@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-22.04
     container: ghcr.io/fenics/dolfinx/dolfinx:stable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Update pip
         run: python3 -m pip install --upgrade pip setuptools
