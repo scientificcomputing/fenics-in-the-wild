@@ -32,6 +32,13 @@ launch_buttons:
   notebook_interface: "jupyterlab"
   binderhub_url: "https://mybinder.org"
 
+sphinx:
+  config:
+    nb_custom_formats:
+      .py:
+        - jupytext.reads
+        - fmt: py
+
 # sphinx:
 #   config:
 # templates_path: ["_templates"]

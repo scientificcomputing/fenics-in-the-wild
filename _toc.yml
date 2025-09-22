@@ -14,7 +14,14 @@ parts:
 
   - caption: "Use case 1"
     chapters:
-      - file: src/ucs/uc1_diffusion
-      - file: src/ucs/uc1_flow
-      - file: src/ucs/uc1_flow_variational_form
+      - file: src/ucs/diffusion/diffusion
+      - file: src/ucs/diffusion/flow
+      - file: src/ucs/diffusion/flow_variational_form
       - file: src/glossary
+
+  - caption: "Modelling of excitable cells"
+    chapters:
+      - file: src/ucs/emi/emi_primal_single
+      - file: src/ucs/emi/emi_primal_mixed
+      - file: src/ucs/emi/emi_mixed_single
+      - file: src/ucs/emi/emi_mixed_mixed
