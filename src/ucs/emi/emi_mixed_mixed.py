@@ -21,9 +21,7 @@ from ufl import (
     dot,
 )
 import numpy as np
-import numpy.typing as npt
 import scifem
-from packaging.version import Version
 
 
 x_L = 0.25
@@ -94,7 +92,9 @@ Gamma, interface_to_parent, _, _, _ = scifem.mesh.extract_submesh(
 
 entity_maps = {interface_to_parent}
 
-ordered_integration_data = scifem.mesh.compute_interface_data(ct, ft.find(interface_marker))
+ordered_integration_data = scifem.mesh.compute_interface_data(
+    ct, ft.find(interface_marker)
+)
 
 # Integration measures for volumes
 dx = Measure("dx", domain=mesh, subdomain_data=ct)

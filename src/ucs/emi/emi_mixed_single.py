@@ -21,9 +21,7 @@ from ufl import (
     dot,
 )
 import numpy as np
-import numpy.typing as npt
 import scifem
-from packaging.version import Version
 
 
 x_L = 0.25
@@ -95,7 +93,9 @@ ft = dolfinx.mesh.meshtags(
 )
 ft.name = "interface_marker"
 
-ordered_integration_data = scifem.mesh.compute_interface_data(ct, ft.find(interface_marker))
+ordered_integration_data = scifem.mesh.compute_interface_data(
+    ct, ft.find(interface_marker)
+)
 
 # Integration measures for volumes
 dx = Measure("dx", domain=mesh, subdomain_data=ct)
@@ -158,17 +158,24 @@ P += div(J) * div(tau) * dx
 P += inv(T) * dot(J("+"), n_i) * dot(tau("+"), n_i) * dGamma
 P += inner(u, q) * dx
 
-petsc_options = {"ksp_type": "minres", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps",
-                 "ksp_error_if_not_converged": True, "ksp_monitor": None, "ksp_rtol": 1e-12, "ksp_atol": 1e-12,
-                 "ksp_norm_type": "preconditioned"}
+petsc_options = {
+    "ksp_type": "minres",
+    "pc_type": "lu",
+    "pc_factor_mat_solver_type": "mumps",
+    "ksp_error_if_not_converged": True,
+    "ksp_monitor": None,
+    "ksp_rtol": 1e-12,
+    "ksp_atol": 1e-12,
+    "ksp_norm_type": "preconditioned",
+}
 u = dolfinx.fem.Function(V)
 tau = dolfinx.fem.Function(S)
 problem = dolfinx.fem.petsc.LinearProblem(
     extract_blocks(a),
     extract_blocks(L),
-    u = [u, tau],
+    u=[u, tau],
     bcs=[],
-    P = extract_blocks(P),
+    P=extract_blocks(P),
     petsc_options=petsc_options,
     petsc_options_prefix="mixed_single_",
 )

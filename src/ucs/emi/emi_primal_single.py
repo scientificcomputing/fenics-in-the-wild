@@ -19,9 +19,7 @@ from ufl import (
     div,
 )
 import numpy as np
-import numpy.typing as npt
 import scifem
-from packaging.version import Version
 
 
 x_L = 0.25
@@ -98,7 +96,9 @@ dx = Measure("dx", domain=mesh, subdomain_data=ct)
 dxI = dx(interior_marker)
 dxE = dx(exterior_marker)
 
-ordered_integration_data = scifem.mesh.compute_interface_data(ct, ft.find(interface_marker))
+ordered_integration_data = scifem.mesh.compute_interface_data(
+    ct, ft.find(interface_marker)
+)
 dGamma = Measure(
     "dS",
     domain=mesh,

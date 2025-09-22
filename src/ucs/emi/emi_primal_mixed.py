@@ -20,9 +20,7 @@ from ufl import (
     div,
 )
 import numpy as np
-import numpy.typing as npt
 import scifem
-from packaging.version import Version
 
 
 x_L = 0.25
@@ -100,7 +98,9 @@ dxI = dx(interior_marker)
 dxE = dx(exterior_marker)
 
 
-ordered_integration_data = scifem.mesh.compute_interface_data(ct, ft.find(interface_marker))
+ordered_integration_data = scifem.mesh.compute_interface_data(
+    ct, ft.find(interface_marker)
+)
 
 Gamma, interface_to_parent, _, _, _ = scifem.mesh.extract_submesh(
     mesh, ft, interface_marker
@@ -172,12 +172,17 @@ bc = dolfinx.fem.dirichletbc(u_bc, bc_dofs)
 ui = dolfinx.fem.Function(Vi, name="ui")
 ue = dolfinx.fem.Function(Ve, name="ue")
 Imh = dolfinx.fem.Function(Q, name="Im")
-petsc_options = {"ksp_type": "preonly", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps",
-                 "ksp_monitor": None, "ksp_error_if_not_converged": True}
+petsc_options = {
+    "ksp_type": "preonly",
+    "pc_type": "lu",
+    "pc_factor_mat_solver_type": "mumps",
+    "ksp_monitor": None,
+    "ksp_error_if_not_converged": True,
+}
 problem = dolfinx.fem.petsc.LinearProblem(
     extract_blocks(a),
     extract_blocks(L),
-    u = [ui, ue, Imh],
+    u=[ui, ue, Imh],
     bcs=[bc],
     petsc_options=petsc_options,
     petsc_options_prefix="primal_mixed_",
