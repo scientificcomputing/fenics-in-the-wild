@@ -16,7 +16,7 @@ from ufl import (
     cos,
     div,
     inv,
-    dot
+    dot,
 )
 import numpy as np
 import numpy.typing as npt
@@ -30,14 +30,20 @@ y_L = 0.25
 y_U = 0.75
 
 
+def lower_bound(x, i, bound, tol=1e-12):
+    return x[i] >= bound - tol
+
+
+def upper_bound(x, i, bound, tol=1e-12):
+    return x[i] <= bound + tol
+
+
 def interior_marker(x, tol=1e-12):
-    lower_bound = lambda x, i, bound: x[i] >= bound - tol
-    upper_bound = lambda x, i, bound: x[i] <= bound + tol
     return (
-        lower_bound(x, 0, x_L)
-        & lower_bound(x, 1, y_L)
-        & upper_bound(x, 0, x_U)
-        & upper_bound(x, 1, y_U)
+        lower_bound(x, 0, x_L, tol=tol)
+        & lower_bound(x, 1, y_L, tol=tol)
+        & upper_bound(x, 0, x_U, tol=tol)
+        & upper_bound(x, 1, y_U, tol=tol)
     )
 
 
@@ -86,6 +92,7 @@ ft = dolfinx.mesh.meshtags(
     mesh, mesh.topology.dim - 1, marker_filter, marker[marker_filter]
 )
 ft.name = "interface_marker"
+
 
 # Create integration measure for interface
 # Interior marker is considered as ("+") restriction
@@ -136,8 +143,7 @@ dGamma = Measure(
     subdomain_data=[(2, ordered_integration_data.flatten())],
     subdomain_id=2,
 )
-ds = Measure("ds", domain=mesh, subdomain_data=ft,
-            subdomain_id=boundary_marker)
+ds = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=boundary_marker)
 
 V = dolfinx.fem.functionspace(mesh, ("DG", 0))
 S = dolfinx.fem.functionspace(mesh, ("RT", 1))
@@ -146,8 +152,12 @@ sigma = dolfinx.fem.Function(V)
 
 sigma_e = 2.0
 sigma_i = 1.0
-sigma.interpolate(lambda x: np.full(x.shape[1],sigma_e), cells0=ct.find(exterior_marker))
-sigma.interpolate(lambda x: np.full(x.shape[1],sigma_i), cells0=ct.find(interior_marker))
+sigma.interpolate(
+    lambda x: np.full(x.shape[1], sigma_e), cells0=ct.find(exterior_marker)
+)
+sigma.interpolate(
+    lambda x: np.full(x.shape[1], sigma_i), cells0=ct.find(interior_marker)
+)
 sigma.x.scatter_forward()
 
 u, J = TrialFunctions(W)
@@ -159,7 +169,7 @@ T = Cm / dt
 n = FacetNormal(mesh)
 n_i = n("+")
 n_e = n("-")
-a = inner(inv(sigma)*J, tau) * dx
+a = inner(inv(sigma) * J, tau) * dx
 a += inv(T) * dot(J("+"), n_i) * dot(tau("+"), n_i) * dGamma
 a -= u * div(tau) * dx
 a -= q * div(J) * dx
@@ -183,9 +193,9 @@ L -= ue_exact * dot(tau, n) * ds
 a_compiled = dolfinx.fem.form(extract_blocks(a))
 L_compiled = dolfinx.fem.form(extract_blocks(L))
 
-P = inv(sigma)*inner(J, tau) * dx
-P += div(J)*div(tau) * dx
-P += inv(T) * dot(J("+"), n_i)*dot(tau("+"), n_i) * dGamma
+P = inv(sigma) * inner(J, tau) * dx
+P += div(J) * div(tau) * dx
+P += inv(T) * dot(J("+"), n_i) * dot(tau("+"), n_i) * dGamma
 P += inner(u, q) * dx
 P_compiled = dolfinx.fem.form(extract_blocks(P))
 B = dolfinx.fem.petsc.assemble_matrix(P_compiled, kind="mpi")
@@ -225,12 +235,8 @@ with dolfinx.io.VTXWriter(omega_i.comm, "u.bp", [u], engine="BP5") as bp:
     bp.write(0.0)
 
 
-error_ui = dolfinx.fem.form(
-    inner(u - ui_exact, u - ui_exact) * dxI
-)
-error_ue = dolfinx.fem.form(
-    inner(u - ue_exact, u - ue_exact) * dxE
-)
+error_ui = dolfinx.fem.form(inner(u - ui_exact, u - ui_exact) * dxI)
+error_ue = dolfinx.fem.form(inner(u - ue_exact, u - ue_exact) * dxE)
 local_ui = dolfinx.fem.assemble_scalar(error_ui)
 local_ue = dolfinx.fem.assemble_scalar(error_ue)
 global_ui = np.sqrt(mesh.comm.allreduce(local_ui, op=MPI.SUM))

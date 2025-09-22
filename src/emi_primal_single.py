@@ -28,19 +28,25 @@ y_L = 0.25
 y_U = 0.75
 
 
+def lower_bound(x, i, bound, tol=1e-12):
+    return x[i] >= bound - tol
+
+
+def upper_bound(x, i, bound, tol=1e-12):
+    return x[i] <= bound + tol
+
+
 def interior_marker(x, tol=1e-12):
-    lower_bound = lambda x, i, bound: x[i] >= bound - tol
-    upper_bound = lambda x, i, bound: x[i] <= bound + tol
     return (
-        lower_bound(x, 0, x_L)
-        & lower_bound(x, 1, y_L)
-        & upper_bound(x, 0, x_U)
-        & upper_bound(x, 1, y_U)
+        lower_bound(x, 0, x_L, tol=tol)
+        & lower_bound(x, 1, y_L, tol=tol)
+        & upper_bound(x, 0, x_U, tol=tol)
+        & upper_bound(x, 1, y_U, tol=tol)
     )
 
 
 # Steps to set up submeshes and interface
-M = 200
+M = 400
 mesh = dolfinx.mesh.create_unit_square(
     MPI.COMM_WORLD, M, M, ghost_mode=dolfinx.mesh.GhostMode.shared_facet
 )
@@ -84,10 +90,6 @@ ft = dolfinx.mesh.meshtags(
     mesh, mesh.topology.dim - 1, marker_filter, marker[marker_filter]
 )
 ft.name = "interface_marker"
-
-with dolfinx.io.XDMFFile(mesh.comm, "cell.xdmf", "w") as xdmf:
-    xdmf.write_mesh(mesh)
-    xdmf.write_meshtags(ft, mesh.geometry)
 
 # Integration measures for volumes
 dx = Measure("dx", domain=mesh, subdomain_data=ct)
@@ -135,24 +137,6 @@ def compute_interface_data(
 
 
 ordered_integration_data = compute_interface_data(ct, ft.find(interface_marker))
-parent_cells_plus = ordered_integration_data[:, 0]
-parent_cells_minus = ordered_integration_data[:, 2]
-mesh_to_interior = np.full(num_cells_local, -1, dtype=np.int32)
-mesh_to_interior[interior_to_parent] = np.arange(
-    len(interior_to_parent), dtype=np.int32
-)
-mesh_to_exterior = np.full(num_cells_local, -1, dtype=np.int32)
-mesh_to_exterior[exterior_to_parent] = np.arange(
-    len(exterior_to_parent), dtype=np.int32
-)
-
-entity_maps = {
-    omega_i: mesh_to_interior,
-    omega_e: mesh_to_exterior,
-}
-entity_maps[omega_i][parent_cells_minus] = entity_maps[omega_i][parent_cells_plus]
-entity_maps[omega_e][parent_cells_plus] = entity_maps[omega_e][parent_cells_minus]
-
 dGamma = Measure(
     "dS",
     domain=mesh,
@@ -170,7 +154,7 @@ ui, ue = TrialFunctions(W)
 sigma_e = dolfinx.fem.Constant(omega_e, 2.0)
 sigma_i = dolfinx.fem.Constant(omega_i, 1.0)
 Cm = dolfinx.fem.Constant(mesh, 1.0)
-dt = dolfinx.fem.Constant(mesh, 1.e-2)
+dt = dolfinx.fem.Constant(mesh, 1.0e-2)
 
 # Setup variational form
 tr_ui = ui("+")
@@ -197,8 +181,6 @@ a += T * (tr_ui - tr_ue) * tr_vi * dGamma
 L = T * inner(f, (tr_vi - tr_ve)) * dGamma
 L -= div(sigma_e * grad(ue_exact)) * ve * dxE
 L -= div(sigma_i * grad(ui_exact)) * vi * dxI
-a_compiled = dolfinx.fem.form(extract_blocks(a), entity_maps=entity_maps)
-L_compiled = dolfinx.fem.form(extract_blocks(L), entity_maps=entity_maps)
 
 sub_tag, _ = scifem.mesh.transfer_meshtags_to_submesh(
     ft, omega_e, e_vertex_to_parent, exterior_to_parent
@@ -213,45 +195,40 @@ u_bc.interpolate(lambda x: np.sin(np.pi * (x[0] + x[1])))
 bc = dolfinx.fem.dirichletbc(u_bc, bc_dofs)
 
 
-A = dolfinx.fem.petsc.assemble_matrix(a_compiled, kind="mpi", bcs=[bc])
-A.assemble()
-b = dolfinx.fem.petsc.assemble_vector(L_compiled, kind="mpi")
-bcs1 = dolfinx.fem.bcs_by_block(
-    dolfinx.fem.extract_function_spaces(a_compiled, 1), [bc]
-)
-dolfinx.fem.petsc.apply_lifting(b, a_compiled, bcs=bcs1)
-b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-bcs0 = dolfinx.fem.bcs_by_block(dolfinx.fem.extract_function_spaces(L_compiled), [bc])
-dolfinx.fem.petsc.set_bc(b, bcs0)
-
 P = sigma_e * inner(grad(ue), grad(ve)) * dxE
 P += sigma_i * inner(grad(ui), grad(vi)) * dxI
 P += inner(ui, vi) * dxI
-P_compiled = dolfinx.fem.form(extract_blocks(P), entity_maps=entity_maps)
+
 bc_P = dolfinx.fem.dirichletbc(0.0, bc_dofs, Ve)
-B = dolfinx.fem.petsc.assemble_matrix(P_compiled, kind="mpi", bcs=[bc_P])
-B.assemble()
 
-ksp = PETSc.KSP().create(mesh.comm)
-ksp.setOperators(A, B)
-ksp.setType("cg")
-ksp.getPC().setType("lu")
-ksp.getPC().setFactorSolverType("mumps")
-ksp.setTolerances(1e-12, 1e-12)
-ksp.setMonitor(lambda ksp, its, rnorm: print(f"Iteration: {its}, residual: {rnorm}"))
-ksp.setNormType(PETSc.KSP.NormType.NORM_PRECONDITIONED)
-ksp.setErrorIfNotConverged(True)
+ui = dolfinx.fem.Function(Vi, name="ui")
+ue = dolfinx.fem.Function(Ve, name="ue")
 
-ui = dolfinx.fem.Function(Vi)
-ue = dolfinx.fem.Function(Ve)
-x = b.duplicate()
-ksp.solve(b, x)
-x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-dolfinx.fem.petsc.assign(x, [ui, ue])
-
-num_iterations = ksp.getIterationNumber()
-converged_reason = ksp.getConvergedReason()
-print(f"Solver converged in: {num_iterations} with reason {converged_reason}")
+entity_maps = [interior_to_parent, exterior_to_parent]
+petsc_options = {
+    "ksp_type": "cg",
+    "pc_type": "lu",
+    "pc_factor_mat_solver_type": "mumps",
+    "ksp_rtol": 1e-12,
+    "ksp_atol": 1e-12,
+    "ksp_monitor": None,
+    "ksp_norm_type": "preconditioned",
+    "ksp_error_if_not_converged": True,
+}
+problem = dolfinx.fem.petsc.LinearProblem(
+    extract_blocks(a),
+    extract_blocks(L),
+    P=extract_blocks(P),
+    u=[ui, ue],
+    bcs=[bc],
+    petsc_options=petsc_options,
+    petsc_options_prefix="primal_single_",
+    entity_maps=entity_maps,
+)
+problem.solve()
+num_iterations = problem.solver.getIterationNumber()
+converged_reason = problem.solver.getConvergedReason()
+PETSc.Sys.Print(f"Solver converged in: {num_iterations} with reason {converged_reason}")
 
 with dolfinx.io.VTXWriter(omega_i.comm, "uh_i.bp", [ui], engine="BP5") as bp:
     bp.write(0.0)
@@ -265,8 +242,6 @@ error_ui = dolfinx.fem.form(
 error_ue = dolfinx.fem.form(
     inner(ue - ue_exact, ue - ue_exact) * dxE, entity_maps=entity_maps
 )
-local_ui = dolfinx.fem.assemble_scalar(error_ui)
-local_ue = dolfinx.fem.assemble_scalar(error_ue)
-global_ui = np.sqrt(mesh.comm.allreduce(local_ui, op=MPI.SUM))
-global_ue = np.sqrt(mesh.comm.allreduce(local_ue, op=MPI.SUM))
-print(f"L2(ui): {global_ui:.2e}\n L2(ue): {global_ue:.2e}")
+L2_ui = np.sqrt(scifem.assemble_scalar(error_ui, entity_maps=entity_maps))
+L2_ue = np.sqrt(scifem.assemble_scalar(error_ue, entity_maps=entity_maps))
+PETSc.Sys.Print(f"L2(ui): {L2_ui:.2e}\n L2(ue): {L2_ue:.2e}")

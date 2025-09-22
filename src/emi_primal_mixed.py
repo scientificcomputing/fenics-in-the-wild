@@ -28,14 +28,20 @@ y_L = 0.25
 y_U = 0.75
 
 
+def lower_bound(x, i, bound, tol=1e-12):
+    return x[i] >= bound - tol
+
+
+def upper_bound(x, i, bound, tol=1e-12):
+    return x[i] <= bound + tol
+
+
 def interior_marker(x, tol=1e-12):
-    lower_bound = lambda x, i, bound: x[i] >= bound - tol
-    upper_bound = lambda x, i, bound: x[i] <= bound + tol
     return (
-        lower_bound(x, 0, x_L)
-        & lower_bound(x, 1, y_L)
-        & upper_bound(x, 0, x_U)
-        & upper_bound(x, 1, y_U)
+        lower_bound(x, 0, x_L, tol=tol)
+        & lower_bound(x, 1, y_L, tol=tol)
+        & upper_bound(x, 0, x_U, tol=tol)
+        & upper_bound(x, 1, y_U, tol=tol)
     )
 
 
@@ -142,14 +148,18 @@ mesh_to_exterior[exterior_to_parent] = np.arange(
     len(exterior_to_parent), dtype=np.int32
 )
 
-Gamma, interface_to_parent, _, _,_ = scifem.mesh.extract_submesh(mesh, ft, interface_marker)
+Gamma, interface_to_parent, _, _, _ = scifem.mesh.extract_submesh(
+    mesh, ft, interface_marker
+)
 parent_to_gamma = np.full(num_facets_local, -1, dtype=np.int32)
-parent_to_gamma[interface_to_parent]= np.arange(len(interface_to_parent), dtype=np.int32)
+parent_to_gamma[interface_to_parent] = np.arange(
+    len(interface_to_parent), dtype=np.int32
+)
 
 entity_maps = {
     omega_i: mesh_to_interior,
     omega_e: mesh_to_exterior,
-    Gamma: parent_to_gamma
+    Gamma: parent_to_gamma,
 }
 entity_maps[omega_i][parent_cells_minus] = entity_maps[omega_i][parent_cells_plus]
 entity_maps[omega_e][parent_cells_plus] = entity_maps[omega_e][parent_cells_minus]
@@ -160,7 +170,6 @@ dGamma = Measure(
     subdomain_data=[(2, ordered_integration_data.flatten())],
     subdomain_id=2,
 )
-
 
 
 element = ("Lagrange", 1)
@@ -200,7 +209,7 @@ a = sigma_e * inner(grad(ue), grad(ve)) * dxE
 a += sigma_i * inner(grad(ui), grad(vi)) * dxI
 a -= Im * tr_ve * dGamma
 a += Im * tr_vi * dGamma
-a += (tr_ui- tr_ue) * jm * dGamma + - 1/T * Im * jm * dGamma
+a += (tr_ui - tr_ue) * jm * dGamma + -1 / T * Im * jm * dGamma
 L = inner(f, jm) * dGamma
 L -= div(sigma_e * grad(ue_exact)) * ve * dxE
 L -= div(sigma_i * grad(ui_exact)) * vi * dxI
