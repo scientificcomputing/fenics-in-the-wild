@@ -9,7 +9,7 @@ dependencies = [
     "jupyter-book",
     "pydata-sphinx-theme",
     "wildmeshing",
-    "scifem>=0.9.0",
+    "scifem>=0.10.0",
     "adios4dolfinx",
 ]
 
