@@ -3,9 +3,8 @@
 ```{toctree}
 :maxdepth: 2
 
-ucs/uc1
-ucs/uc2
+ucs/diffusion/diffusion
+ucs/emi/emi_primal_single
 
 ```
 
-Hello

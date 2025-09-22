@@ -179,3 +179,5 @@ _build
 *.zip
 *.stl
 *.ply
+*.png
+*.msh

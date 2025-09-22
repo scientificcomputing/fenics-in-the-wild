@@ -1,3 +1,5 @@
+# # Primal single-domain formulation
+
 from mpi4py import MPI
 from petsc4py import PETSc
 import dolfinx
@@ -96,47 +98,7 @@ dx = Measure("dx", domain=mesh, subdomain_data=ct)
 dxI = dx(interior_marker)
 dxE = dx(exterior_marker)
 
-
-# Create integration measure for interface
-# Interior marker is considered as ("+") restriction
-def compute_interface_data(
-    cell_tags: dolfinx.mesh.MeshTags, facet_indices: npt.NDArray[np.int32]
-) -> npt.NDArray[np.int32]:
-    """
-    Compute interior facet integrals that are consistently ordered according to the `cell_tags`,
-    such that the data `(cell0, facet_idx0, cell1, facet_idx1)` is ordered such that
-    `cell_tags[cell0]`<`cell_tags[cell1]`, i.e the cell with the lowest cell marker is considered the
-    "+" restriction".
-
-    Args:
-        cell_tags: MeshTags that must contain an integer marker for all cells adjacent to the `facet_indices`
-        facet_indices: List of facets (local index) that are on the interface.
-    Returns:
-        The integration data.
-    """
-    # Future compatibilty check
-    integration_args: tuple[int] | tuple
-    if Version("0.10.0") <= Version(dolfinx.__version__):
-        integration_args = ()
-    else:
-        fdim = cell_tags.dim - 1
-        integration_args = (fdim,)
-    idata = dolfinx.cpp.fem.compute_integration_domains(
-        dolfinx.fem.IntegralType.interior_facet,
-        cell_tags.topology,
-        facet_indices,
-        *integration_args,
-    )
-    ordered_idata = idata.reshape(-1, 4).copy()
-    switch = (
-        cell_tags.values[ordered_idata[:, 0]] > cell_tags.values[ordered_idata[:, 2]]
-    )
-    if True in switch:
-        ordered_idata[switch, :] = ordered_idata[switch][:, [2, 3, 0, 1]]
-    return ordered_idata
-
-
-ordered_integration_data = compute_interface_data(ct, ft.find(interface_marker))
+ordered_integration_data = scifem.mesh.compute_interface_data(ct, ft.find(interface_marker))
 dGamma = Measure(
     "dS",
     domain=mesh,

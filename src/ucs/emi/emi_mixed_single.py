@@ -1,3 +1,5 @@
+# # Mixed single-domain formulation
+
 from mpi4py import MPI
 from petsc4py import PETSc
 import dolfinx
@@ -48,7 +50,7 @@ def interior_marker(x, tol=1e-12):
 
 
 # Steps to set up submeshes and interface
-M = 200
+M = 400
 mesh = dolfinx.mesh.create_unit_square(
     MPI.COMM_WORLD, M, M, ghost_mode=dolfinx.mesh.GhostMode.shared_facet
 )
@@ -93,47 +95,7 @@ ft = dolfinx.mesh.meshtags(
 )
 ft.name = "interface_marker"
 
-
-# Create integration measure for interface
-# Interior marker is considered as ("+") restriction
-def compute_interface_data(
-    cell_tags: dolfinx.mesh.MeshTags, facet_indices: npt.NDArray[np.int32]
-) -> npt.NDArray[np.int32]:
-    """
-    Compute interior facet integrals that are consistently ordered according to the `cell_tags`,
-    such that the data `(cell0, facet_idx0, cell1, facet_idx1)` is ordered such that
-    `cell_tags[cell0]`<`cell_tags[cell1]`, i.e the cell with the lowest cell marker is considered the
-    "+" restriction".
-
-    Args:
-        cell_tags: MeshTags that must contain an integer marker for all cells adjacent to the `facet_indices`
-        facet_indices: List of facets (local index) that are on the interface.
-    Returns:
-        The integration data.
-    """
-    # Future compatibilty check
-    integration_args: tuple[int] | tuple
-    if Version("0.10.0") <= Version(dolfinx.__version__):
-        integration_args = ()
-    else:
-        fdim = cell_tags.dim - 1
-        integration_args = (fdim,)
-    idata = dolfinx.cpp.fem.compute_integration_domains(
-        dolfinx.fem.IntegralType.interior_facet,
-        cell_tags.topology,
-        facet_indices,
-        *integration_args,
-    )
-    ordered_idata = idata.reshape(-1, 4).copy()
-    switch = (
-        cell_tags.values[ordered_idata[:, 0]] > cell_tags.values[ordered_idata[:, 2]]
-    )
-    if True in switch:
-        ordered_idata[switch, :] = ordered_idata[switch][:, [2, 3, 0, 1]]
-    return ordered_idata
-
-
-ordered_integration_data = compute_interface_data(ct, ft.find(interface_marker))
+ordered_integration_data = scifem.mesh.compute_interface_data(ct, ft.find(interface_marker))
 
 # Integration measures for volumes
 dx = Measure("dx", domain=mesh, subdomain_data=ct)
@@ -190,55 +152,35 @@ L = -f * inner(tau("+"), n_i) * dGamma
 L -= -div(sigma_e * grad(ue_exact)) * q * dxE
 L -= -div(sigma_i * grad(ui_exact)) * q * dxI
 L -= ue_exact * dot(tau, n) * ds
-a_compiled = dolfinx.fem.form(extract_blocks(a))
-L_compiled = dolfinx.fem.form(extract_blocks(L))
 
 P = inv(sigma) * inner(J, tau) * dx
 P += div(J) * div(tau) * dx
 P += inv(T) * dot(J("+"), n_i) * dot(tau("+"), n_i) * dGamma
 P += inner(u, q) * dx
-P_compiled = dolfinx.fem.form(extract_blocks(P))
-B = dolfinx.fem.petsc.assemble_matrix(P_compiled, kind="mpi")
-B.assemble()
 
-A = dolfinx.fem.petsc.assemble_matrix(a_compiled, kind="mpi", bcs=[])
-A.assemble()
-b = dolfinx.fem.petsc.assemble_vector(L_compiled, kind="mpi")
-# bcs1 = dolfinx.fem.bcs_by_block(
-#     dolfinx.fem.extract_function_spaces(a_compiled, 1), [bc]
-# )
-# dolfinx.fem.petsc.apply_lifting(b, a_compiled, bcs=bcs1)
-b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-# bcs0 = dolfinx.fem.bcs_by_block(dolfinx.fem.extract_function_spaces(L_compiled), [bc])
-# dolfinx.fem.petsc.set_bc(b, bcs0)
-
-ksp = PETSc.KSP().create(mesh.comm)
-ksp.setOperators(A, B)
-
-ksp.setType("minres")
-ksp.getPC().setType("lu")
-ksp.getPC().setFactorSolverType("mumps")
-ksp.setErrorIfNotConverged(True)
-ksp.setTolerances(1e-12, 1e-12)
-ksp.setMonitor(lambda ksp, its, rnorm: print(f"Iteration: {its}, residual: {rnorm}"))
-ksp.setNormType(PETSc.KSP.NormType.NORM_PRECONDITIONED)
-
+petsc_options = {"ksp_type": "minres", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps",
+                 "ksp_error_if_not_converged": True, "ksp_monitor": None, "ksp_rtol": 1e-12, "ksp_atol": 1e-12,
+                 "ksp_norm_type": "preconditioned"}
 u = dolfinx.fem.Function(V)
 tau = dolfinx.fem.Function(S)
-x = b.duplicate()
-ksp.solve(b, x)
-x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-dolfinx.fem.petsc.assign(x, [u, tau])
+problem = dolfinx.fem.petsc.LinearProblem(
+    extract_blocks(a),
+    extract_blocks(L),
+    u = [u, tau],
+    bcs=[],
+    P = extract_blocks(P),
+    petsc_options=petsc_options,
+    petsc_options_prefix="mixed_single_",
+)
+problem.solve()
 
 
 with dolfinx.io.VTXWriter(omega_i.comm, "u.bp", [u], engine="BP5") as bp:
     bp.write(0.0)
 
 
-error_ui = dolfinx.fem.form(inner(u - ui_exact, u - ui_exact) * dxI)
-error_ue = dolfinx.fem.form(inner(u - ue_exact, u - ue_exact) * dxE)
-local_ui = dolfinx.fem.assemble_scalar(error_ui)
-local_ue = dolfinx.fem.assemble_scalar(error_ue)
-global_ui = np.sqrt(mesh.comm.allreduce(local_ui, op=MPI.SUM))
-global_ue = np.sqrt(mesh.comm.allreduce(local_ue, op=MPI.SUM))
-print(f"L2(ui): {global_ui:.2e}\n L2(ue): {global_ue:.2e}")
+error_ui = inner(u - ui_exact, u - ui_exact) * dxI
+error_ue = inner(u - ue_exact, u - ue_exact) * dxE
+L2_ui = np.sqrt(scifem.assemble_scalar(error_ui))
+L2_ue = np.sqrt(scifem.assemble_scalar(error_ue))
+PETSc.Sys.Print(f"L2(ui): {L2_ui:.2e}\n L2(ue): {L2_ue:.2e}")
