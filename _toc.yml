@@ -21,6 +21,7 @@ parts:
 
   - caption: "Modelling of excitable cells"
     chapters:
+      - file: src/ucs/emi/emi
       - file: src/ucs/emi/emi_primal_single
       - file: src/ucs/emi/emi_primal_mixed
       - file: src/ucs/emi/emi_mixed_single
