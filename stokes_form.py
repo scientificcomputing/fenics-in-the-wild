@@ -8,7 +8,6 @@ import basix.ufl
 import adios4dolfinx
 import numpy.typing as npt
 from pathlib import Path
-from packaging.version import Version
 import dolfinx.fem.petsc
 from time import perf_counter
 
@@ -102,96 +101,6 @@ def tangent_projection(u, n):
     return u - ufl.dot(u, n) * n
 
 
-def strong_bc_bdm_function(
-    Q: dolfinx.fem.FunctionSpace,
-    expr: ufl.core.expr.Expr,
-    facets: npt.NDArray[np.int32],
-) -> dolfinx.fem.Function:
-    """
-    n
-    """
-    domain = Q.mesh
-    Q_el = Q.element
-    domain.topology.create_connectivity(domain.topology.dim - 1, domain.topology.dim)
-    # Compute integration entities (cell, local_facet index) for all facets
-    if Version(dolfinx.__version__) > Version("0.9.0"):
-        boundary_entities = dolfinx.fem.compute_integration_domains(
-            dolfinx.fem.IntegralType.exterior_facet, domain.topology, facets
-        )
-    else:
-        boundary_entities = dolfinx.fem.compute_integration_domains(
-            dolfinx.fem.IntegralType.exterior_facet,
-            domain.topology,
-            facets,
-            domain.topology.dim - 1,
-        )
-
-    interpolation_points = Q_el.basix_element.x
-    fdim = domain.topology.dim - 1
-
-    c_el = domain.ufl_domain().ufl_coordinate_element()
-    ref_top = c_el.reference_topology
-    ref_geom = c_el.reference_geometry
-    facet_types = set(
-        basix.cell.subentity_types(domain.basix_cell())[domain.topology.dim - 1]
-    )
-    assert len(facet_types) == 1, "All facets must have the same topology"
-
-    # Pull back interpolation points from reference coordinate element to facet reference element
-    facet_cmap = basix.ufl.element(
-        "Lagrange",
-        facet_types.pop(),
-        c_el.degree,
-        shape=(domain.geometry.dim,),
-        dtype=np.float64,
-    )
-    facet_cel = dolfinx.cpp.fem.CoordinateElement_float64(facet_cmap.basix_element._e)
-    reference_facet_points = None
-    for i, points in enumerate(interpolation_points[fdim]):
-        geom = ref_geom[ref_top[fdim][i]]
-        ref_points = facet_cel.pull_back(points, geom)
-        # Assert that interpolation points are all equal on all facets
-        if reference_facet_points is None:
-            reference_facet_points = ref_points
-        else:
-            assert np.allclose(reference_facet_points, ref_points)
-    # Create expression for BC
-    normal_expr = dolfinx.fem.Expression(expr, reference_facet_points)
-
-    points_per_entity = [sum(ip.shape[0] for ip in ips) for ips in interpolation_points]
-    offsets = np.zeros(domain.topology.dim + 2, dtype=np.int32)
-    offsets[1:] = np.cumsum(points_per_entity[: domain.topology.dim + 1])
-    values_per_entity = np.zeros(
-        (offsets[-1], domain.geometry.dim), dtype=dolfinx.default_scalar_type
-    )
-    entities = boundary_entities.reshape(-1, 2)
-    values = np.zeros(entities.shape[0] * offsets[-1] * domain.geometry.dim)
-    for i, entity in enumerate(entities):
-        insert_pos = offsets[fdim] + reference_facet_points.shape[0] * entity[1]
-        # Backwards compatibility
-        try:
-            normal_on_facet = normal_expr.eval(domain, entity.reshape(1, 2))
-        except AttributeError:
-            normal_on_facet = normal_expr.eval(domain, entity)
-
-        # NOTE: evaluate within loop to avoid large memory requirements
-        values_per_entity[insert_pos : insert_pos + reference_facet_points.shape[0]] = (
-            normal_on_facet.reshape(-1, domain.geometry.dim)
-        )
-        values[
-            i * offsets[-1] * domain.geometry.dim : (i + 1)
-            * offsets[-1]
-            * domain.geometry.dim
-        ] = values_per_entity.reshape(-1)
-    qh = dolfinx.fem.Function(Q)
-    qh._cpp_object.interpolate(
-        values.reshape(-1, domain.geometry.dim).T.copy(), boundary_entities[::2].copy()
-    )
-    qh.x.scatter_forward()
-
-    return qh
-
-
 def stokes_solver(
     mesh: dolfinx.mesh.Mesh,
     subdomains: dolfinx.mesh.MeshTags,
@@ -241,7 +150,7 @@ def stokes_solver(
     inflow_facets = facet_markers.indices[
         np.isin(facet_markers.values, facet_map["LV_PAR"])
     ]
-    u_bc = strong_bc_bdm_function(
+    u_bc = scifem.interpolate_function_onto_facet_dofs(
         V,
         inlet_expr,
         inflow_facets,
@@ -257,7 +166,9 @@ def stokes_solver(
             [facet_map["V34_PAR"], facet_map["PAR_SAS"], facet_map["AM_L"]],
         )
     ]
-    u_wall = strong_bc_bdm_function(V, dolfinx.fem.Constant(mesh, 0.0) * n, walls)
+    u_wall = scifem.interpolate_function_onto_facet_dofs(
+        V, dolfinx.fem.Constant(mesh, 0.0) * n, walls
+    )
     wall_dofs = dolfinx.fem.locate_dofs_topological(
         (W.sub(0), V), mesh.topology.dim - 1, walls
     )
