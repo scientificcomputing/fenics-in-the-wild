@@ -8,7 +8,6 @@ import basix.ufl
 import adios4dolfinx
 import numpy.typing as npt
 from pathlib import Path
-from packaging.version import Version
 import dolfinx.fem.petsc
 from time import perf_counter
 
@@ -167,7 +166,9 @@ def stokes_solver(
             [facet_map["V34_PAR"], facet_map["PAR_SAS"], facet_map["AM_L"]],
         )
     ]
-    u_wall = scifem.interpolate_function_onto_facet_dofs(V, dolfinx.fem.Constant(mesh, 0.0) * n, walls)
+    u_wall = scifem.interpolate_function_onto_facet_dofs(
+        V, dolfinx.fem.Constant(mesh, 0.0) * n, walls
+    )
     wall_dofs = dolfinx.fem.locate_dofs_topological(
         (W.sub(0), V), mesh.topology.dim - 1, walls
     )
