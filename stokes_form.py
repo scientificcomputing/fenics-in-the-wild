@@ -314,196 +314,196 @@ def compute_subdomain_exterior_cells(
     )
 
 
-if __name__ == "__main__":
-    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "test_marius.xdmf", "r") as xdmf:
-        mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.none)
-        ct = xdmf.read_meshtags(mesh, name="mesh_tags")
+# if __name__ == "__main__":
+#     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "test_marius.xdmf", "r") as xdmf:
+#         mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.none)
+#         ct = xdmf.read_meshtags(mesh, name="mesh_tags")
 
-    fluid_domains = subdomain_map["LV"] + subdomain_map["SAS"] + subdomain_map["V34"]
+#     fluid_domains = subdomain_map["LV"] + subdomain_map["SAS"] + subdomain_map["V34"]
 
-    # Refine parent mesh within ventricles
-    num_refinements = 2
-    if num_refinements == 0:
-        refined_mesh = mesh
-        refined_ct = ct
-    for i in range(num_refinements):
-        # Refine parent mesh within ventricles
-        refine_cells = ct.indices[
-            np.isin(
-                ct.values,
-                np.asarray(subdomain_map["V34"] + subdomain_map["LV"]),
-            )
-        ]
+#     # Refine parent mesh within ventricles
+#     num_refinements = 2
+#     if num_refinements == 0:
+#         refined_mesh = mesh
+#         refined_ct = ct
+#     for i in range(num_refinements):
+#         # Refine parent mesh within ventricles
+#         refine_cells = ct.indices[
+#             np.isin(
+#                 ct.values,
+#                 np.asarray(subdomain_map["V34"] + subdomain_map["LV"]),
+#             )
+#         ]
 
-        # Find all cells associated with outer boundary (dura) and refine the cells they correspond to
-        mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
-        fmap = mesh.topology.index_map(mesh.topology.dim - 1)
-        exterior_facet_indices = scifem.mesh.reverse_mark_entities(
-            fmap, dolfinx.mesh.exterior_facet_indices(mesh.topology)
-        )
-        boundary_cells = dolfinx.mesh.compute_incident_entities(
-            mesh.topology,
-            exterior_facet_indices,
-            mesh.topology.dim - 1,
-            mesh.topology.dim,
-        )
+#         # Find all cells associated with outer boundary (dura) and refine the cells they correspond to
+#         mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
+#         fmap = mesh.topology.index_map(mesh.topology.dim - 1)
+#         exterior_facet_indices = scifem.mesh.reverse_mark_entities(
+#             fmap, dolfinx.mesh.exterior_facet_indices(mesh.topology)
+#         )
+#         boundary_cells = dolfinx.mesh.compute_incident_entities(
+#             mesh.topology,
+#             exterior_facet_indices,
+#             mesh.topology.dim - 1,
+#             mesh.topology.dim,
+#         )
 
-        fluid_boundary_cells = compute_subdomain_exterior_cells(mesh, ct, fluid_domains)
+#         fluid_boundary_cells = compute_subdomain_exterior_cells(mesh, ct, fluid_domains)
 
-        # For any further refinement, only refine the boundary of the fluid domains, not the interior
-        if i < 1:
-            cells_to_refine = np.unique(
-                np.hstack([boundary_cells, fluid_boundary_cells, refine_cells])
-            ).astype(np.int32)
+#         # For any further refinement, only refine the boundary of the fluid domains, not the interior
+#         if i < 1:
+#             cells_to_refine = np.unique(
+#                 np.hstack([boundary_cells, fluid_boundary_cells, refine_cells])
+#             ).astype(np.int32)
 
-        else:
-            cells_to_refine = refine_cells
+#         else:
+#             cells_to_refine = refine_cells
 
-        edges_to_refine = dolfinx.mesh.compute_incident_entities(
-            mesh.topology, cells_to_refine, mesh.topology.dim, 1
-        )
-        edge_map = mesh.topology.index_map(1)
-        edges_to_refine = scifem.mesh.reverse_mark_entities(edge_map, edges_to_refine)
-        refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
-            mesh,
-            edges_to_refine,
-            partitioner=None,
-            option=dolfinx.mesh.RefinementOption.parent_cell,
-        )
-        refined_ct = dolfinx.mesh.transfer_meshtag(ct, refined_mesh, parent_cell)
-        mesh = refined_mesh
-        ct = refined_ct
+#         edges_to_refine = dolfinx.mesh.compute_incident_entities(
+#             mesh.topology, cells_to_refine, mesh.topology.dim, 1
+#         )
+#         edge_map = mesh.topology.index_map(1)
+#         edges_to_refine = scifem.mesh.reverse_mark_entities(edge_map, edges_to_refine)
+#         refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
+#             mesh,
+#             edges_to_refine,
+#             partitioner=None,
+#             option=dolfinx.mesh.RefinementOption.parent_cell,
+#         )
+#         refined_ct = dolfinx.mesh.transfer_meshtag(ct, refined_mesh, parent_cell)
+#         mesh = refined_mesh
+#         ct = refined_ct
 
-    def upper_skull(x, upper_skull_z=0.027):
-        return x[2] - 0.8 * x[1] > upper_skull_z
+#     def upper_skull(x, upper_skull_z=0.027):
+#         return x[2] - 0.8 * x[1] > upper_skull_z
 
-    parent_ft = define_subdomain_markers(
-        refined_mesh, refined_ct, subdomain_map, interface_map, upper_skull
-    )
-    parent_ft.name = "interfaces_and_boundaries"
-    comm = refined_mesh.comm
-    with dolfinx.io.XDMFFile(comm, "refined.xdmf", "w") as xdmf:
-        xdmf.write_mesh(refined_mesh)
-        xdmf.write_meshtags(refined_ct, refined_mesh.geometry)
-        xdmf.write_meshtags(parent_ft, refined_mesh.geometry)
-    del refined_ct, parent_ft, refined_mesh
-    comm.Barrier()
+#     parent_ft = define_subdomain_markers(
+#         refined_mesh, refined_ct, subdomain_map, interface_map, upper_skull
+#     )
+#     parent_ft.name = "interfaces_and_boundaries"
+#     comm = refined_mesh.comm
+#     with dolfinx.io.XDMFFile(comm, "refined.xdmf", "w") as xdmf:
+#         xdmf.write_mesh(refined_mesh)
+#         xdmf.write_meshtags(refined_ct, refined_mesh.geometry)
+#         xdmf.write_meshtags(parent_ft, refined_mesh.geometry)
+#     del refined_ct, parent_ft, refined_mesh
+#     comm.Barrier()
 
-    with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "refined.xdmf", "r") as xdmf:
-        refined_mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.shared_facet)
-        refined_ct = xdmf.read_meshtags(refined_mesh, name="mesh_tags")
-        refined_mesh.topology.create_connectivity(
-            refined_mesh.topology.dim - 1, refined_mesh.topology.dim
-        )
-        refined_ft = xdmf.read_meshtags(refined_mesh, name="interfaces_and_boundaries")
+#     with dolfinx.io.XDMFFile(MPI.COMM_WORLD, "refined.xdmf", "r") as xdmf:
+#         refined_mesh = xdmf.read_mesh(ghost_mode=dolfinx.mesh.GhostMode.shared_facet)
+#         refined_ct = xdmf.read_meshtags(refined_mesh, name="mesh_tags")
+#         refined_mesh.topology.create_connectivity(
+#             refined_mesh.topology.dim - 1, refined_mesh.topology.dim
+#         )
+#         refined_ft = xdmf.read_meshtags(refined_mesh, name="interfaces_and_boundaries")
 
-    csf_mesh, cell_map, vertex_map, node_map, csf_markers = scifem.mesh.extract_submesh(
-        refined_mesh,
-        refined_ct,
-        fluid_domains,
-    )
+#     csf_mesh, cell_map, vertex_map, node_map, csf_markers = scifem.mesh.extract_submesh(
+#         refined_mesh,
+#         refined_ct,
+#         fluid_domains,
+#     )
 
-    interface_marker, _ = scifem.transfer_meshtags_to_submesh(
-        refined_ft, csf_mesh, vertex_map, cell_map
-    )
-    interface_marker.name = "interfaces"
-    with dolfinx.io.XDMFFile(csf_mesh.comm, "csf.xdmf", "w") as xdmf:
-        xdmf.write_mesh(csf_mesh)
-        xdmf.write_meshtags(csf_markers, csf_mesh.geometry)
-        csf_mesh.topology.create_connectivity(
-            csf_mesh.topology.dim - 1, csf_mesh.topology.dim
-        )
-        xdmf.write_meshtags(interface_marker, csf_mesh.geometry)
+#     interface_marker, _ = scifem.transfer_meshtags_to_submesh(
+#         refined_ft, csf_mesh, vertex_map, cell_map
+#     )
+#     interface_marker.name = "interfaces"
+#     with dolfinx.io.XDMFFile(csf_mesh.comm, "csf.xdmf", "w") as xdmf:
+#         xdmf.write_mesh(csf_mesh)
+#         xdmf.write_meshtags(csf_markers, csf_mesh.geometry)
+#         csf_mesh.topology.create_connectivity(
+#             csf_mesh.topology.dim - 1, csf_mesh.topology.dim
+#         )
+#         xdmf.write_meshtags(interface_marker, csf_mesh.geometry)
 
-    # --------------------- SIMPLE test setup ----------------------
-    # N = 10
-    # csf_mesh = dolfinx.mesh.create_unit_cube(
-    #     MPI.COMM_WORLD,
-    #     N,
-    #     N,
-    #     N,
-    #     dolfinx.cpp.mesh.CellType.tetrahedron,
-    #     ghost_mode=dolfinx.mesh.GhostMode.shared_facet,
-    # )
-    # cell_map = csf_mesh.topology.index_map(csf_mesh.topology.dim)
-    # num_cells = cell_map.size_local + cell_map.num_ghosts
-    # csf_markers = dolfinx.mesh.meshtags(
-    #     csf_mesh,
-    #     csf_mesh.topology.dim,
-    #     np.arange(num_cells, dtype=np.int32),
-    #     np.full(num_cells, subdomain_map["SAS"], dtype=np.int32),
-    # )
+#     # --------------------- SIMPLE test setup ----------------------
+#     # N = 10
+#     # csf_mesh = dolfinx.mesh.create_unit_cube(
+#     #     MPI.COMM_WORLD,
+#     #     N,
+#     #     N,
+#     #     N,
+#     #     dolfinx.cpp.mesh.CellType.tetrahedron,
+#     #     ghost_mode=dolfinx.mesh.GhostMode.shared_facet,
+#     # )
+#     # cell_map = csf_mesh.topology.index_map(csf_mesh.topology.dim)
+#     # num_cells = cell_map.size_local + cell_map.num_ghosts
+#     # csf_markers = dolfinx.mesh.meshtags(
+#     #     csf_mesh,
+#     #     csf_mesh.topology.dim,
+#     #     np.arange(num_cells, dtype=np.int32),
+#     #     np.full(num_cells, subdomain_map["SAS"], dtype=np.int32),
+#     # )
 
-    # csf_mesh.topology.create_connectivity(
-    #     csf_mesh.topology.dim - 1, csf_mesh.topology.dim
-    # )
-    # facet_map = csf_mesh.topology.index_map(csf_mesh.topology.dim - 1)
-    # num_facets = facet_map.size_local + facet_map.num_ghosts
-    # values = np.full(num_facets, -1, dtype=np.int32)
+#     # csf_mesh.topology.create_connectivity(
+#     #     csf_mesh.topology.dim - 1, csf_mesh.topology.dim
+#     # )
+#     # facet_map = csf_mesh.topology.index_map(csf_mesh.topology.dim - 1)
+#     # num_facets = facet_map.size_local + facet_map.num_ghosts
+#     # values = np.full(num_facets, -1, dtype=np.int32)
 
-    # tb = dolfinx.mesh.locate_entities_boundary(
-    #     csf_mesh,
-    #     csf_mesh.topology.dim - 1,
-    #     lambda x: np.isclose(x[1], 0)
-    #     | np.isclose(x[1], 1)
-    #     | np.isclose(x[2], 1)
-    #     | np.isclose(x[2], 0),
-    # )
-    # values[tb] = interface_map["PAR_SAS"]
-    # lft = dolfinx.mesh.locate_entities_boundary(
-    #     csf_mesh,
-    #     csf_mesh.topology.dim - 1,
-    #     lambda x: np.isclose(x[0], 1),
-    # )
-    # values[lft] = interface_map["AM_U"]
-    # rft = dolfinx.mesh.locate_entities_boundary(
-    #     csf_mesh,
-    #     csf_mesh.topology.dim - 1,
-    #     lambda x: np.isclose(x[0], 0),
-    # )
-    # values[rft] = interface_map["LV_PAR"]
-    # indices = np.flatnonzero(values >= 0)
-    # values = values[indices]
-    # interface_marker = dolfinx.mesh.meshtags(
-    #     csf_mesh, csf_mesh.topology.dim - 1, indices, values
-    # )
-    degree = 1
-    uh, ph = stokes_solver(
-        csf_mesh,
-        csf_markers,
-        interface_marker,
-        subdomain_map,
-        interface_map,
-        mu=0.7e-3,
-        u_in=4.63e-9,
-        R0=1e4,
-        degree=degree,
-    )
+#     # tb = dolfinx.mesh.locate_entities_boundary(
+#     #     csf_mesh,
+#     #     csf_mesh.topology.dim - 1,
+#     #     lambda x: np.isclose(x[1], 0)
+#     #     | np.isclose(x[1], 1)
+#     #     | np.isclose(x[2], 1)
+#     #     | np.isclose(x[2], 0),
+#     # )
+#     # values[tb] = interface_map["PAR_SAS"]
+#     # lft = dolfinx.mesh.locate_entities_boundary(
+#     #     csf_mesh,
+#     #     csf_mesh.topology.dim - 1,
+#     #     lambda x: np.isclose(x[0], 1),
+#     # )
+#     # values[lft] = interface_map["AM_U"]
+#     # rft = dolfinx.mesh.locate_entities_boundary(
+#     #     csf_mesh,
+#     #     csf_mesh.topology.dim - 1,
+#     #     lambda x: np.isclose(x[0], 0),
+#     # )
+#     # values[rft] = interface_map["LV_PAR"]
+#     # indices = np.flatnonzero(values >= 0)
+#     # values = values[indices]
+#     # interface_marker = dolfinx.mesh.meshtags(
+#     #     csf_mesh, csf_mesh.topology.dim - 1, indices, values
+#     # )
+#     degree = 1
+#     uh, ph = stokes_solver(
+#         csf_mesh,
+#         csf_markers,
+#         interface_marker,
+#         subdomain_map,
+#         interface_map,
+#         mu=0.7e-3,
+#         u_in=4.63e-9,
+#         R0=1e4,
+#         degree=degree,
+#     )
 
-    # For visualization of fluid flow within fluid cavities
-    V_out = dolfinx.fem.functionspace(
-        csf_mesh, ("DG", degree, (csf_mesh.geometry.dim,))
-    )
-    u_out = dolfinx.fem.Function(V_out, name="Velocity")
-    u_out.interpolate(uh)
-    with dolfinx.io.VTXWriter(csf_mesh.comm, "uh.bp", [u_out], engine="BP4") as bp:
-        bp.write(0.0)
+#     # For visualization of fluid flow within fluid cavities
+#     V_out = dolfinx.fem.functionspace(
+#         csf_mesh, ("DG", degree, (csf_mesh.geometry.dim,))
+#     )
+#     u_out = dolfinx.fem.Function(V_out, name="Velocity")
+#     u_out.interpolate(uh)
+#     with dolfinx.io.VTXWriter(csf_mesh.comm, "uh.bp", [u_out], engine="BP4") as bp:
+#         bp.write(0.0)
 
-    # Map solution back onto the parent grid
-    child_cells = np.arange(len(cell_map), dtype=np.int32)
-    V_full = dolfinx.fem.functionspace(refined_mesh, uh.function_space.ufl_element())
-    u_full = dolfinx.fem.Function(V_full, name="u")
-    u_full.interpolate(uh, cells0=child_cells, cells1=cell_map)
+#     # Map solution back onto the parent grid
+#     child_cells = np.arange(len(cell_map), dtype=np.int32)
+#     V_full = dolfinx.fem.functionspace(refined_mesh, uh.function_space.ufl_element())
+#     u_full = dolfinx.fem.Function(V_full, name="u")
+#     u_full.interpolate(uh, cells0=child_cells, cells1=cell_map)
 
-    # Store solution and tags in checkpoint
-    checkpoint_file = Path("checkpoint.bp")
-    adios4dolfinx.write_mesh(checkpoint_file, refined_mesh)
-    adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, refined_ct)
-    adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, refined_ft)
-    adios4dolfinx.write_function(checkpoint_file, u_full)
-    adios4dolfinx.write_attributes(
-        checkpoint_file, refined_mesh.comm, "cell_map", subdomain_map
-    )
-    adios4dolfinx.write_attributes(
-        checkpoint_file, refined_mesh.comm, "facet_map", interface_map
-    )
+#     # Store solution and tags in checkpoint
+#     checkpoint_file = Path("checkpoint.bp")
+#     adios4dolfinx.write_mesh(checkpoint_file, refined_mesh)
+#     adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, refined_ct)
+#     adios4dolfinx.write_meshtags(checkpoint_file, refined_mesh, refined_ft)
+#     adios4dolfinx.write_function(checkpoint_file, u_full)
+#     adios4dolfinx.write_attributes(
+#         checkpoint_file, refined_mesh.comm, "cell_map", subdomain_map
+#     )
+#     adios4dolfinx.write_attributes(
+#         checkpoint_file, refined_mesh.comm, "facet_map", interface_map
+#     )

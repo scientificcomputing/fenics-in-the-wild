@@ -1,4 +1,4 @@
-FROM ghcr.io/fenics/dolfinx/lab:stable
+FROM ghcr.io/fenics/dolfinx/lab:nightly
 
 
 # create user with a home directory

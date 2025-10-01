@@ -78,13 +78,13 @@ point_array, cell_array, marker = tetra.get_tet_mesh()
 
 mesh = dolfinx.mesh.create_mesh(
     MPI.COMM_WORLD,
-    cell_array.astype(np.int64),
-    point_array,
-    ufl.Mesh(basix.ufl.element("Lagrange", "tetrahedron", 1, shape=(3,))),
+    cells=cell_array.astype(np.int64),
+    x=point_array,
+    e=ufl.Mesh(basix.ufl.element("Lagrange", "tetrahedron", 1, shape=(3,))),
 )
 
 
-local_entities, local_values = dolfinx.io.gmshio.distribute_entity_data(
+local_entities, local_values = dolfinx.io.gmsh.distribute_entity_data(
     mesh,
     mesh.topology.dim,
     cell_array.astype(np.int64),

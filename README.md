@@ -40,19 +40,11 @@ Clone spack from its git repository (https://github.com/spack/spack)
 
 ```bash
 . ./spack/share/spack/setup-env.sh
-spack env create fenicsx-stable
-spack env activate fenicsx-stable
+spack env create fenicsx-main
+spack env activate fenicsx-main
 spack add py-pip py-h5py py-scipy py-pyvista
-spack add py-fenics-dolfinx fenics-dolfinx+adios2 ^adios2+python ^petsc+mumps+int64 cflags="-O3" fflags="-O3"
-spack add py-scikit-build-core py-nanobind
+spack add py-fenics-dolfinx@main ^fenics-dolfinx+adios2 ^adios2+python ^petsc+mumps+int64 cflags="-O3" fflags="-O3"
+spack add py-nanobind py-adios4dolfinx@main py-scifem@main+adios2+biomed
 spack install
-python3 -m pip install adios4dolfinx wildmeshing git+https://github.com/scientificcomputing/scifem.git
-```
-
-Currently one has to work around:
-https://github.com/ornladios/ADIOS2/issues/4485
-by locating where ADIOS2 puts its Python package and add it to the Python path.
-
-```
-
+python3 -m pip install wildmeshing
 ```

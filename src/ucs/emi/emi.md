@@ -16,9 +16,16 @@ v &=u_e-u_i&& \text{at } \Gamma\\
 \end{align*}
 $$
 
-# ## Implementations
+:::{figure-md} markdown-fig
+<img src="./domain_sketch.png" alt="emi_domain" width="400px">
 
-With the finite element method, there are two classical ways of modelling Poisson-like equations,
+Illustration of the intracellular and extracellular space.
+Figure is from {cite}`Benedusi2024` and is under the [creative commons license](http://creativecommons.org/licenses/by/4.0/).
+:::
+
+## Implementations
+
+With the {term}`fem`, there are two classical ways of modelling Poisson-like equations,
 namely the *primal* and *mixed* formulation.
 However, as the EMI problem can be thought of as two Poisson problems with a specific coupling condition,
 it expands the number of possible discretizations to four {cite}`Kuchta2021emi`:
@@ -27,7 +34,6 @@ it expands the number of possible discretizations to four {cite}`Kuchta2021emi`:
 - [The primal, mixed dimensional domain formulation](./emi_primal_mixed.py)
 - [The mixed, single dimensional domain formulation](./emi_mixed_single.py)
 - [The mixed, mixed dimensional domain formulation](./emi_mixed_mixed.py)
-
 
 ## References
 

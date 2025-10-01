@@ -26,7 +26,7 @@ PVS
     Paravascular space - The fluid area surrounding arteries in the brain.
 
 CSF
-    Cerebrospinal fluid - The fluid that surruounds the brain and spinal coord.
+    Cerebrospinal fluid - The fluid that surrounds the brain and spinal coord.
 
 ```
 
