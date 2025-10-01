@@ -5,9 +5,7 @@ import numpy as np
 import ufl
 import typing
 import basix.ufl
-import adios4dolfinx
 import numpy.typing as npt
-from pathlib import Path
 import dolfinx.fem.petsc
 from time import perf_counter
 
