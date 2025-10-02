@@ -84,7 +84,7 @@ mesh = dolfinx.mesh.create_mesh(
 )
 
 
-local_entities, local_values = dolfinx.io.gmsh.distribute_entity_data(
+local_entities, local_values = dolfinx.io.distribute_entity_data(
     mesh,
     mesh.topology.dim,
     cell_array.astype(np.int64),

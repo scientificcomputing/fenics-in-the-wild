@@ -66,15 +66,13 @@ ct = dolfinx.mesh.meshtags(
     mesh, mesh.topology.dim, np.arange(num_cells_local, dtype=np.int32), cell_marker
 )
 
-omega_i, interior_to_parent, _, _, _ = scifem.mesh.extract_submesh(
-    mesh, ct, interior_marker
-)
-omega_e, exterior_to_parent, e_vertex_to_parent, _, _ = scifem.mesh.extract_submesh(
+omega_i, interior_to_parent, _, _, _ = scifem.extract_submesh(mesh, ct, interior_marker)
+omega_e, exterior_to_parent, e_vertex_to_parent, _, _ = scifem.extract_submesh(
     mesh, ct, exterior_marker
 )
 
 
-gamma = scifem.mesh.find_interface(ct, interior_marker, exterior_marker)
+gamma = scifem.find_interface(ct, interior_marker, exterior_marker)
 
 mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
 exterior_facets = dolfinx.mesh.exterior_facet_indices(mesh.topology)
@@ -98,13 +96,9 @@ dxI = dx(interior_marker)
 dxE = dx(exterior_marker)
 
 
-ordered_integration_data = scifem.mesh.compute_interface_data(
-    ct, ft.find(interface_marker)
-)
+ordered_integration_data = scifem.compute_interface_data(ct, ft.find(interface_marker))
 
-Gamma, interface_to_parent, _, _, _ = scifem.mesh.extract_submesh(
-    mesh, ft, interface_marker
-)
+Gamma, interface_to_parent, _, _, _ = scifem.extract_submesh(mesh, ft, interface_marker)
 
 entity_maps = [interface_to_parent, exterior_to_parent, interior_to_parent]
 dGamma = Measure(
@@ -157,7 +151,7 @@ L = inner(f, jm) * dGamma
 L -= div(sigma_e * grad(ue_exact)) * ve * dxE
 L -= div(sigma_i * grad(ui_exact)) * vi * dxI
 
-sub_tag, _ = scifem.mesh.transfer_meshtags_to_submesh(
+sub_tag, _ = scifem.transfer_meshtags_to_submesh(
     ft, omega_e, e_vertex_to_parent, exterior_to_parent
 )
 omega_e.topology.create_connectivity(omega_e.topology.dim - 1, omega_e.topology.dim)

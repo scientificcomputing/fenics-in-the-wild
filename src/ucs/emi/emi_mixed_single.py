@@ -67,15 +67,13 @@ ct = dolfinx.mesh.meshtags(
     mesh, mesh.topology.dim, np.arange(num_cells_local, dtype=np.int32), cell_marker
 )
 
-omega_i, interior_to_parent, _, _, _ = scifem.mesh.extract_submesh(
-    mesh, ct, interior_marker
-)
-omega_e, exterior_to_parent, e_vertex_to_parent, _, _ = scifem.mesh.extract_submesh(
+omega_i, interior_to_parent, _, _, _ = scifem.extract_submesh(mesh, ct, interior_marker)
+omega_e, exterior_to_parent, e_vertex_to_parent, _, _ = scifem.extract_submesh(
     mesh, ct, exterior_marker
 )
 
 
-gamma = scifem.mesh.find_interface(ct, interior_marker, exterior_marker)
+gamma = scifem.find_interface(ct, interior_marker, exterior_marker)
 
 mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
 exterior_facets = dolfinx.mesh.exterior_facet_indices(mesh.topology)
@@ -93,9 +91,7 @@ ft = dolfinx.mesh.meshtags(
 )
 ft.name = "interface_marker"
 
-ordered_integration_data = scifem.mesh.compute_interface_data(
-    ct, ft.find(interface_marker)
-)
+ordered_integration_data = scifem.compute_interface_data(ct, ft.find(interface_marker))
 
 # Integration measures for volumes
 dx = Measure("dx", domain=mesh, subdomain_data=ct)

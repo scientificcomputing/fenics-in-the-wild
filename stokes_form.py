@@ -42,11 +42,7 @@ def define_subdomain_markers(
     """
     # Sanity check, LV should not touch SAS
     assert (
-        len(
-            scifem.mesh.find_interface(
-                cell_tags, subdomain_map["LV"], subdomain_map["SAS"]
-            )
-        )
+        len(scifem.find_interface(cell_tags, subdomain_map["LV"], subdomain_map["SAS"]))
         == 0
     )
     for m, val in interface_map.items():
@@ -64,14 +60,14 @@ def define_subdomain_markers(
         mesh, mesh.topology.dim - 1, AM_U_function
     )
 
-    inflow_facets = scifem.mesh.find_interface(
+    inflow_facets = scifem.find_interface(
         cell_tags, subdomain_map["PAR"], subdomain_map["LV"]
     )
-    v34_walls = scifem.mesh.find_interface(
+    v34_walls = scifem.find_interface(
         cell_tags, subdomain_map["PAR"], subdomain_map["V34"]
     )
 
-    internal_walls = scifem.mesh.find_interface(
+    internal_walls = scifem.find_interface(
         cell_tags, subdomain_map["PAR"], subdomain_map["SAS"]
     )
 
@@ -292,7 +288,7 @@ def compute_subdomain_exterior_cells(
         Cells which has a facet on the exterior boundary of the subdomains.
     """
     # Find facets that are considered exterior
-    subdomain_exterior_facets = scifem.mesh.compute_subdomain_exterior_facets(
+    subdomain_exterior_facets = scifem.compute_subdomain_exterior_facets(
         mesh, ct, markers
     )
     tdim = mesh.topology.dim
@@ -307,7 +303,7 @@ def compute_subdomain_exterior_cells(
         np.isin(ct.values, np.asarray(markers, dtype=ct.values.dtype))
     ]
     cell_map = mesh.topology.index_map(tdim)
-    return scifem.mesh.reverse_mark_entities(
+    return scifem.reverse_mark_entities(
         cell_map, np.intersect1d(full_subdomain, sub_cells)
     )
 
@@ -336,7 +332,7 @@ def compute_subdomain_exterior_cells(
 #         # Find all cells associated with outer boundary (dura) and refine the cells they correspond to
 #         mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
 #         fmap = mesh.topology.index_map(mesh.topology.dim - 1)
-#         exterior_facet_indices = scifem.mesh.reverse_mark_entities(
+#         exterior_facet_indices = scifem.reverse_mark_entities(
 #             fmap, dolfinx.mesh.exterior_facet_indices(mesh.topology)
 #         )
 #         boundary_cells = dolfinx.mesh.compute_incident_entities(
@@ -361,7 +357,7 @@ def compute_subdomain_exterior_cells(
 #             mesh.topology, cells_to_refine, mesh.topology.dim, 1
 #         )
 #         edge_map = mesh.topology.index_map(1)
-#         edges_to_refine = scifem.mesh.reverse_mark_entities(edge_map, edges_to_refine)
+#         edges_to_refine = scifem.reverse_mark_entities(edge_map, edges_to_refine)
 #         refined_mesh, parent_cell, _ = dolfinx.mesh.refine(
 #             mesh,
 #             edges_to_refine,
@@ -395,7 +391,7 @@ def compute_subdomain_exterior_cells(
 #         )
 #         refined_ft = xdmf.read_meshtags(refined_mesh, name="interfaces_and_boundaries")
 
-#     csf_mesh, cell_map, vertex_map, node_map, csf_markers = scifem.mesh.extract_submesh(
+#     csf_mesh, cell_map, vertex_map, node_map, csf_markers = scifem.extract_submesh(
 #         refined_mesh,
 #         refined_ct,
 #         fluid_domains,
