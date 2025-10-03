@@ -105,10 +105,7 @@ ft = dolfinx.mesh.meshtags(omega, tdim - 1, marker_filter, marker[marker_filter]
 ft.name = "interface_marker"
 # -
 
-# ```{note} Integration measures
-# Note that since we are working on a single mesh, we can use the standard {py:class}`Measure<ufl.Measure>`
-# with appropriate `subdomain_data` and `subdomain_id` to restrict the integration domains.
-# ```
+# As we require integration over the interior boundary, from the view-point of the
 
 dx = Measure("dx", domain=omega, subdomain_data=ct)
 dGamma = Measure("dS", domain=omega, subdomain_data=ft, subdomain_id=interface_marker)
