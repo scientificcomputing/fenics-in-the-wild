@@ -8,8 +8,8 @@ In this section, we limit ourselves two the following set of equations, with a s
 
 $$
 \begin{align*}
--\nabla \cdot (\sigma_e\nabla u_e) &= 0&& \text{in } \Omega_e\\
--\nabla \cdot (\sigma_i\nabla u_i) &= 0&& \text{in } \Omega_i\\
+-\nabla \cdot (\sigma_e\nabla u_e) &= f_e&& \text{in } \Omega_e\\
+-\nabla \cdot (\sigma_i\nabla u_i) &= f_i&& \text{in } \Omega_i\\
 \sigma_e\nabla u_e\cdot \mathbf{n}_e = - \sigma_i\nabla u_i\cdot \mathbf{n}_i &\equiv I_m&&\text{at } \Gamma\\
 v &=u_e-u_i&& \text{at } \Gamma\\
 \frac{\partial v}{\partial t} &= \frac{1}{C_m}(I_m-I_{ion})&& \text{at } \Gamma

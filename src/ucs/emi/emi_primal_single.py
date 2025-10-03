@@ -7,10 +7,12 @@
 # $$
 # \int_{\Omega_e} \sigma_e \nabla u_e \cdot \nabla v_e~\mathrm{d}x +
 # \int_\Gamma \frac{C_m}{\Delta t} (u_e - u_i) v_e ~\mathrm{d}s &=
+# \int_{\Omega_e} f_e v_e ~\mathrm{d}x
 # - \frac{C_m}{\Delta t} \int_\Gamma f v_e ~\mathrm{d}s \\
 # \int_{\Omega_i} \sigma_i \nabla u_i \cdot \nabla v_i~\mathrm{d}x
 # + \int_\Gamma \frac{C_m}{\Delta t} (u_i - u_e) v_i ~\mathrm{d}s &=
-# \frac{C_m}{\Delta t} \int_\Gamma f v_i ~\mathrm{d}s
+# \int_{\Omega_i} f_i v_i ~\mathrm{d}x
+# + \frac{C_m}{\Delta t} \int_\Gamma f v_i ~\mathrm{d}s
 # $$
 #
 # for all $v_e\in V_e$ and $v_i\in V_i$.
@@ -137,7 +139,8 @@ dxI = dx(interior_marker)
 dxE = dx(exterior_marker)
 
 # ## Setting up the mixed function space and variational form
-# We use {py:class}`MixedFunctionSpace<ufl.MixedFunctionSpace>` to create the mixed function space
+# We create each of the spaces, and make them a {py:class}`mixed function space <ufl.MixedFunctionSpace>`, which
+# we can extract {py:func}`test<ufl.TestFunctions>` and {py:func}`trial<ufl.TrialFunctions>` functions from.
 
 element = ("Lagrange", 1)
 Vi = dolfinx.fem.functionspace(omega_i, element)
@@ -146,73 +149,118 @@ W = MixedFunctionSpace(Vi, Ve)
 vi, ve = TestFunctions(W)
 ui, ue = TrialFunctions(W)
 
-
 # Next, for the interface integrals, we want to create a {py:class}`measure<ufl.Measure>` that integrates over $\Gamma$.
 # However, as $\Gamma$ connects to two cells, one from $\Omega_i$ and one from $\Omega_e$, we need to define
-# the appropriate restrictions to compute the jump of $u_e$ and $u_i$.
+# the appropriate restrictions of $u_e$, $u_i$, $v_e$, and $v_i$ to the interface.
+# This is done by calling  {py:func}`scifem.compute_interface_data`, which returns the integration data order such that
+# the "+" side of the [restriction](https://docs.fenicsproject.org/ufl/main/manual/form_language.html#restriction-v-and-v)
+# corresponds to the smallest cell tag of `interior_marker` and `exterior_marker`.
+# We pass in the ordered integration data to the initializer of a {py:class}`measure<ufl.Measure>`.
 
-
+i_res = "+" if interior_marker < exterior_marker else "-"
+e_res = "-" if interior_marker < exterior_marker else "+"
 ordered_integration_data = scifem.compute_interface_data(ct, ft.find(interface_marker))
+interface_tag = 2
 dGamma = Measure(
     "dS",
     domain=omega,
-    subdomain_data=[(2, ordered_integration_data.flatten())],
-    subdomain_id=2,
+    subdomain_data=[(interface_tag, ordered_integration_data.flatten())],
+    subdomain_id=interface_tag,
 )
+
+# Next, we define the trace operators on the interface for each of the functions.
+
+tr_ui = ui(i_res)
+tr_ue = ue(e_res)
+tr_vi = vi(i_res)
+tr_ve = ve(e_res)
+
+# ## Variational formulation
+
+# We define the problem parameters as {py:class}`Constant<dolfinx.fem.Constant>` objects.
+# This is to make the code efficient, enven if we change the parameter values later.
 
 sigma_e = dolfinx.fem.Constant(omega_e, 2.0)
 sigma_i = dolfinx.fem.Constant(omega_i, 1.0)
 Cm = dolfinx.fem.Constant(omega, 1.0)
 dt = dolfinx.fem.Constant(omega, 1.0e-2)
 
-# Setup variational form
-tr_ui = ui("+")
-tr_ue = ue("-")
-tr_vi = vi("+")
-tr_ve = ve("-")
-
+# Next, we define the exact solution of each of the potentials
 x, y = SpatialCoordinate(omega)
 ue_exact = sin(pi * (x + y))
 ui_exact = sigma_e / sigma_i * ue_exact + cos(pi * (x - x_L) * (x - x_U)) * cos(
     pi * (y - y_L) * (y - y_U)
 )
 
+# We also define corresponding right hand side source terms $f$, $f_i$, $f_e$ that fulfills the
+# strong form of the equations, given the exact solutions above. This is called the
+# *method of manufactured solutions*.
+
 n = FacetNormal(omega)
-n_e = n("-")
+n_e = n(e_res)
 Im = sigma_e * inner(grad(ue_exact), n_e)
 T = Cm / dt
 f = ui_exact - ue_exact - 1 / T * Im
+f_e = -div(sigma_e * grad(ue_exact))
+f_i = -div(sigma_i * grad(ui_exact))
+
+
+# We can then define the variational formulation with the bilinear form `a` and linear form `L`
 
 a = sigma_e * inner(grad(ue), grad(ve)) * dxE
 a += sigma_i * inner(grad(ui), grad(vi)) * dxI
 a += T * (tr_ue - tr_ui) * tr_ve * dGamma
 a += T * (tr_ui - tr_ue) * tr_vi * dGamma
 L = T * inner(f, (tr_vi - tr_ve)) * dGamma
-L -= div(sigma_e * grad(ue_exact)) * ve * dxE
-L -= div(sigma_i * grad(ui_exact)) * vi * dxI
+L += f_e * ve * dxE
+L += f_i * vi * dxI
+
+# We impose a Dirichlet boundary condition on the outer boundary of $\Omega_e$.
+# To do this, we transfer the facet tags (`ft`) from the parent mesh to the submesh (`omega_e`)
+# by calling {py:func}`scifem.transfer_meshtags_to_submesh`.
 
 sub_tag, _ = scifem.transfer_meshtags_to_submesh(
     ft, omega_e, e_vertex_to_parent, exterior_to_parent
 )
+
+# With the tags transferred onto the submesh, we can locate the degree of freedom (dofs)
+# that we want to constrain with {py:func}`dolfinx.fem.locate_dofs_topological`
+
 omega_e.topology.create_connectivity(omega_e.topology.dim - 1, omega_e.topology.dim)
 bc_dofs = dolfinx.fem.locate_dofs_topological(
     Ve, omega_e.topology.dim - 1, sub_tag.find(boundary_marker)
 )
+
+# We interpolate the exact solution into the appropriate function space
+# and create a {py:class}`DirichletBC<dolfinx.fem.DirichletBC>` object using
+# the {py:func}`dolfinx.fem.dirichletbc` constructor.
+
 u_bc = dolfinx.fem.Function(Ve)
 u_bc.interpolate(lambda x: np.sin(np.pi * (x[0] + x[1])))
-
 bc = dolfinx.fem.dirichletbc(u_bc, bc_dofs)
 
+# ## Preconditioning of the system
+# {cite}`emi-Kuchta2021prec` suggests using the following preconditioner for the system:
+#
+# $$
+# P &=
+# \begin{pmatrix}
+#    \int_{\Omega_i} \sigma_i \nabla u_i \cdot \nabla v_i + u_i v_i ~\mathrm{d}x & 0 \\
+#    0 & \int_{\Omega_e} \sigma_e \nabla u_e \cdot \nabla v_e ~\mathrm{d}x
+# \end{pmatrix}
+# $$
 
 P = sigma_e * inner(grad(ue), grad(ve)) * dxE
 P += sigma_i * inner(grad(ui), grad(vi)) * dxI
 P += inner(ui, vi) * dxI
 
-bc_P = dolfinx.fem.dirichletbc(0.0, bc_dofs, Ve)
+# ## Solving the system
+# We use the {py:class}`LinearProblem<dolfinx.fem.petsc.LinearProblem>` class to set up
+# a solver for the linear system. We use {py:func}`extract_blocks<ufl.extract_blocks>`
+# to extract the block structure of the bilinear form, linear form, and preconditioner.
 
 ui = dolfinx.fem.Function(Vi, name="ui")
 ue = dolfinx.fem.Function(Ve, name="ue")
-
 entity_maps = [interior_to_parent, exterior_to_parent]
 petsc_options = {
     "ksp_type": "cg",
@@ -235,15 +283,24 @@ problem = dolfinx.fem.petsc.LinearProblem(
     entity_maps=entity_maps,
 )
 problem.solve()
+
+# We check the numbers of iterations and the {py:class}`reason<petsc4py.PETSc.KSP.ConvergedReason>` for convergence
+
 num_iterations = problem.solver.getIterationNumber()
 converged_reason = problem.solver.getConvergedReason()
 PETSc.Sys.Print(f"Solver converged in: {num_iterations} with reason {converged_reason}")
 
-with dolfinx.io.VTXWriter(omega_i.comm, "uh_i.bp", [ui], engine="BP5") as bp:
-    bp.write(0.0)
-with dolfinx.io.VTXWriter(omega_i.comm, "uh_e.bp", [ue], engine="BP5") as bp:
-    bp.write(0.0)
+# If we have {py:class}`adios2.Adios` installed, we can save the solution to a file that can be visualized
+# in Paraview
 
+if dolfinx.has_adios2:
+    with dolfinx.io.VTXWriter(omega_i.comm, "uh_i.bp", [ui], engine="BP5") as bp:
+        bp.write(0.0)
+    with dolfinx.io.VTXWriter(omega_i.comm, "uh_e.bp", [ue], engine="BP5") as bp:
+        bp.write(0.0)
+
+
+# Finally, we compute the $L^2$ error of each of the potentials
 
 error_ui = dolfinx.fem.form(
     inner(ui - ui_exact, ui - ui_exact) * dxI, entity_maps=entity_maps
@@ -253,7 +310,8 @@ error_ue = dolfinx.fem.form(
 )
 L2_ui = np.sqrt(scifem.assemble_scalar(error_ui, entity_maps=entity_maps))
 L2_ue = np.sqrt(scifem.assemble_scalar(error_ue, entity_maps=entity_maps))
-PETSc.Sys.Print(f"L2(ui): {L2_ui:.2e}\n L2(ue): {L2_ue:.2e}")
+
+PETSc.Sys.Print(f"L2(ui): {L2_ui:.2e}\nL2(ue): {L2_ue:.2e}")
 
 
 # ```{bibliography}

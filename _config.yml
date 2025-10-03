@@ -51,6 +51,7 @@ sphinx:
       pyvista: ["https://docs.pyvista.org/", null]
       packaging: ["https://packaging.pypa.io/en/stable/", null]
       scifem: ["https://scientificcomputing.github.io/scifem/", null]
+      adios2: ["https://adios2.readthedocs.io/en/latest/", null]
 
   extra_extensions:
     - 'sphinx.ext.autodoc'
