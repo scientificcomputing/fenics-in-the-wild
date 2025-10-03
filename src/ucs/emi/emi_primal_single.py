@@ -60,7 +60,7 @@ def upper_bound(x, i, bound, tol=1e-12):
     return x[i] <= bound + tol
 
 
-def interior_marker(x, tol=1e-12):
+def omega_interior_marker(x, tol=1e-12):
     return (
         lower_bound(x, 0, x_L, tol=tol)
         & lower_bound(x, 1, y_L, tol=tol)
@@ -82,7 +82,7 @@ omega = dolfinx.mesh.create_unit_square(
 # interior cells with `interior_marker`, and the remaining (exterior) cells with `exterior_marker`.
 
 interior_cells = dolfinx.mesh.locate_entities(
-    omega, omega.topology.dim, interior_marker
+    omega, omega.topology.dim, omega_interior_marker
 )
 interior_marker = 2
 exterior_marker = 3
@@ -106,7 +106,7 @@ omega_e, exterior_to_parent, e_vertex_to_parent, _, _ = scifem.extract_submesh(
 
 # We identity the facets on the interface $\Gamma$ using {py:func}`scifem.find_interface`.
 
-gamma = scifem.find_interface(ct, interior_marker, exterior_marker)
+gamma_facets = scifem.find_interface(ct, interior_marker, exterior_marker)
 
 # We create a {py:class}`MeshTags<dolfinx.mesh.MeshTags>` object that marks the
 # facets on $\Gamma$ with `interface_marker` and additionally  marks all exterior facets with `boundary_marker`.
@@ -121,7 +121,7 @@ facets = np.arange(num_facets_local, dtype=np.int32)
 interface_marker = 4
 boundary_marker = 5
 marker = np.full_like(facets, -1, dtype=np.int32)
-marker[gamma] = interface_marker
+marker[gamma_facets] = interface_marker
 marker[exterior_facets] = boundary_marker
 marker_filter = np.flatnonzero(marker != -1).astype(np.int32)
 ft = dolfinx.mesh.meshtags(
@@ -149,6 +149,8 @@ W = MixedFunctionSpace(Vi, Ve)
 vi, ve = TestFunctions(W)
 ui, ue = TrialFunctions(W)
 
+# (consistent_restrictions)=
+# ### Consistent restrictions
 # Next, for the interface integrals, we want to create a {py:class}`measure<ufl.Measure>` that integrates over $\Gamma$.
 # However, as $\Gamma$ connects to two cells, one from $\Omega_i$ and one from $\Omega_e$, we need to define
 # the appropriate restrictions of $u_e$, $u_i$, $v_e$, and $v_i$ to the interface.
@@ -192,6 +194,8 @@ ui_exact = sigma_e / sigma_i * ue_exact + cos(pi * (x - x_L) * (x - x_U)) * cos(
     pi * (y - y_L) * (y - y_U)
 )
 
+# (manufactured_solutions)=
+# ### Method of manufactured solutions
 # We also define corresponding right hand side source terms $f$, $f_i$, $f_e$ that fulfills the
 # strong form of the equations, given the exact solutions above. This is called the
 # *method of manufactured solutions*.
@@ -258,6 +262,8 @@ P += inner(ui, vi) * dxI
 # We use the {py:class}`LinearProblem<dolfinx.fem.petsc.LinearProblem>` class to set up
 # a solver for the linear system. We use {py:func}`extract_blocks<ufl.extract_blocks>`
 # to extract the block structure of the bilinear form, linear form, and preconditioner.
+# We pass in a list of {py:class}`EntityMaps<dolfinx.mesh.EntityMap>` for each of the meshes
+# used in the formulation to ensure that the assembly is done correctly.
 
 ui = dolfinx.fem.Function(Vi, name="ui")
 ue = dolfinx.fem.Function(Ve, name="ue")
