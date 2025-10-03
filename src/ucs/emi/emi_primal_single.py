@@ -136,11 +136,21 @@ dx = Measure("dx", domain=omega, subdomain_data=ct)
 dxI = dx(interior_marker)
 dxE = dx(exterior_marker)
 
-# (submesh-interface)
-# ## Internal interface integrals
+# ## Setting up the mixed function space and variational form
+# We use {py:class}`MixedFunctionSpace<ufl.MixedFunctionSpace>` to create the mixed function space
+
+element = ("Lagrange", 1)
+Vi = dolfinx.fem.functionspace(omega_i, element)
+Ve = dolfinx.fem.functionspace(omega_e, element)
+W = MixedFunctionSpace(Vi, Ve)
+vi, ve = TestFunctions(W)
+ui, ue = TrialFunctions(W)
+
+
 # Next, for the interface integrals, we want to create a {py:class}`measure<ufl.Measure>` that integrates over $\Gamma$.
 # However, as $\Gamma$ connects to two cells, one from $\Omega_i$ and one from $\Omega_e$, we need to define
 # the appropriate restrictions to compute the jump of $u_e$ and $u_i$.
+
 
 ordered_integration_data = scifem.compute_interface_data(ct, ft.find(interface_marker))
 dGamma = Measure(
@@ -149,13 +159,6 @@ dGamma = Measure(
     subdomain_data=[(2, ordered_integration_data.flatten())],
     subdomain_id=2,
 )
-
-element = ("Lagrange", 1)
-Vi = dolfinx.fem.functionspace(omega_i, element)
-Ve = dolfinx.fem.functionspace(omega_e, element)
-W = MixedFunctionSpace(Vi, Ve)
-vi, ve = TestFunctions(W)
-ui, ue = TrialFunctions(W)
 
 sigma_e = dolfinx.fem.Constant(omega_e, 2.0)
 sigma_i = dolfinx.fem.Constant(omega_i, 1.0)

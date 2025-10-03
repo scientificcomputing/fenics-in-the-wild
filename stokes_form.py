@@ -250,7 +250,12 @@ def stokes_solver(
         # "mat_mumps_icntl_25": 1,
     }
     problem = dolfinx.fem.petsc.LinearProblem(
-        a, L, bcs=bcs, petsc_options=petsc_options, jit_options=jit_options
+        a,
+        L,
+        bcs=bcs,
+        petsc_options=petsc_options,
+        jit_options=jit_options,
+        petsc_options_prefix="StokesSolver_",
     )
     tic = perf_counter()
     wh = problem.solve()
