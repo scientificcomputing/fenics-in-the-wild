@@ -1,6 +1,6 @@
 # # Primal single-domain formulation
 
-# In this example, we consider the formulation from Chapter 5.2.1 of {cite}`emi-Kuchta2021emi`.
+# In this example, we consider the formulation from Chapter 5.2.1 of {cite}`emips-Kuchta2021emi`.
 #
 # Find $u_i\in V_i=V(\Omega_i)$ and $u_e\in V_e=V(\Omega_e)$ such that
 #
@@ -244,7 +244,7 @@ u_bc.interpolate(lambda x: np.sin(np.pi * (x[0] + x[1])))
 bc = dolfinx.fem.dirichletbc(u_bc, bc_dofs)
 
 # ## Preconditioning of the system
-# {cite}`emi-Kuchta2021prec` suggests using the following preconditioner for the system:
+# {cite}`emips-Kuchta2021prec` suggests using the following preconditioner for the system:
 #
 # $$
 # P &=
@@ -323,5 +323,5 @@ PETSc.Sys.Print(f"L2(ui): {L2_ui:.2e}\nL2(ue): {L2_ue:.2e}")
 # ```{bibliography}
 # :filter: cited
 # :labelprefix:
-# :keyprefix: emi-
+# :keyprefix: emips-
 # ```

@@ -6,7 +6,7 @@
 # required for the mixed dimensional formulation.
 # ```
 #
-# In this example, we consider the formulation from Chapter 5.2.2 of {cite}`emi-Kuchta2021emi`.
+# In this example, we consider the formulation from Chapter 5.2.2 of {cite}`emims-Kuchta2021emi`.
 #
 # Find $\mathbf{J} \in S$, $u\in V$ such that
 #
@@ -44,7 +44,7 @@ from ufl import (
 import numpy as np
 import scifem
 
-M = 132
+M = 256
 x_L = 0.25
 x_U = 0.75
 y_L = 0.25
@@ -105,17 +105,50 @@ ft = dolfinx.mesh.meshtags(omega, tdim - 1, marker_filter, marker[marker_filter]
 ft.name = "interface_marker"
 # -
 
-# As we require integration over the interior boundary, from the view-point of the
+# ## One-sided integrals over an interior interface
+# As we require integration over the interior boundary, from the view-point of the interior domain,
+# we will define an integration measure that is "one-sided", commonly known as an "exterior facet" measure.
+# To make this measure, we first extract the ordered integration entities, as done in the previous examples.
+
+ordered_integration_data = scifem.compute_interface_data(ct, ft.find(interface_marker))
+
+# We know that {py:func}`scifem.compute_interface_data` returns the integration entities, where the first cell is
+# corresponding to the one with the smallest tag, and the second cell is the one with the largest tag.
+# As each integration entity is a tuple of `(cell, local_facet_index)`, we extract the relevant data
+
+i_indices = np.array([0, 1]) if interior_marker < exterior_marker else np.array([2, 3])
+onesided_integration_data = (
+    interface_marker,
+    ordered_integration_data[:, i_indices].flatten(),
+)
+
+# In addition, we convert the exterior facet indices to the same format,
+# using {py:func}`dolfinx.fem.compute_integration_domains`
+
+exterior_indices = dolfinx.fem.compute_integration_domains(
+    dolfinx.fem.IntegralType.exterior_facet, omega.topology, ft.find(boundary_marker)
+)
+exterior_integration_data = (boundary_marker, exterior_indices)
+
+# We can now the define the {py:class}`Measure<dolfinx.fem.Measure>` object,
+# including both sets of integraton entities.
+# We make restricted integrals by calling the measure with the appropriate marker.
+
+ds = Measure(
+    "ds",
+    domain=omega,
+    subdomain_data=[exterior_integration_data, onesided_integration_data],
+)
+dGamma_i = ds(interface_marker)
+ds_ext = ds(boundary_marker)
 
 dx = Measure("dx", domain=omega, subdomain_data=ct)
-dGamma = Measure("dS", domain=omega, subdomain_data=ft, subdomain_id=interface_marker)
-ds = Measure("ds", domain=omega, subdomain_data=ft, subdomain_id=boundary_marker)
 
 # We define the function-spaces as before
 
-V = dolfinx.fem.functionspace(omega, ("DG", 0))
-S = dolfinx.fem.functionspace(omega, ("RT", 1))
-W = MixedFunctionSpace(V, S)
+V = dolfinx.fem.functionspace(omega, ("DG", 1))
+S = dolfinx.fem.functionspace(omega, ("RT", 2))
+W = MixedFunctionSpace(S, V)
 
 # Next, as we would like to unify the treatment of the spatially varying `sigma`, we
 # use a discontinuous function space of piecewise constants to represent the conductivity.
@@ -134,19 +167,19 @@ sigma.interpolate(
 )
 sigma.x.scatter_forward()
 
+# ## Define the variational problem
 
+# +
 Cm = dolfinx.fem.Constant(omega, 1.0)
 dt = dolfinx.fem.Constant(omega, 1e-4)
 T = Cm / dt
 
-u, J = TrialFunctions(W)
-q, tau = TestFunctions(W)
+J, u = TrialFunctions(W)
+tau, q = TestFunctions(W)
 
 n = FacetNormal(omega)
-n_i = n("+")
-n_e = n("-")
 a = inner(inv(sigma) * J, tau) * dx
-a += inv(T) * dot(J("+"), n_i) * dot(tau("+"), n_i) * dGamma
+a += inv(T) * dot(J, n) * dot(tau, n) * dGamma_i
 a -= u * div(tau) * dx
 a -= q * div(J) * dx
 
@@ -158,19 +191,42 @@ ui_exact = sigma_e / sigma_i * ue_exact + cos(pi * (x - x_L) * (x - x_U)) * cos(
 )
 
 
-Im_exact = sigma_e * inner(grad(ue_exact), n_e)
+Im_exact = sigma_e * inner(grad(ue_exact), -n)
 f = ui_exact - ue_exact - 1 / T * Im_exact
 dxE = dx(exterior_marker)
 dxI = dx(interior_marker)
-L = -f * inner(tau("+"), n_i) * dGamma
+L = -f * inner(tau, n) * dGamma_i
 L -= -div(sigma_e * grad(ue_exact)) * q * dxE
 L -= -div(sigma_i * grad(ui_exact)) * q * dxI
-L -= ue_exact * dot(tau, n) * ds
+L -= ue_exact * dot(tau, n) * ds_ext
+# -
+
+# ## Preconditioning
+# We follow chapter 6.2.2 of {cite}`emims-Kuchta2021prec` and use the $\mathcal{B}_2$ preconditioner,
+# which is inf-sup stable.
+#
+# $$
+# \begin{align}
+#  P &= \begin{pmatrix}
+#  \int_{\Omega} \sigma^{-1} J \cdot tau
+#  + \nabla \cdot J \nabla \cdot tau ~\mathrm{d}x
+#  + \int_{\Gamma} \frac{\Delta t}{C_m}
+# \mathbf{J}\cdot \mathbf{n} \mathbf{\tau}\cdot \mathbf{n}~\mathrm{d}s & 0 \\
+#  0 & \int_{\Omega} u q~\mathrm{d}x
+# \end{pmatrix}
+# \end{align}
+# $$
 
 P = inv(sigma) * inner(J, tau) * dx
 P += div(J) * div(tau) * dx
-P += inv(T) * dot(J("+"), n_i) * dot(tau("+"), n_i) * dGamma
+P += inv(T) * dot(J, n) * dot(tau, n) * dGamma_i
 P += inner(u, q) * dx
+
+# ## Solve the linear system
+# We use {py:attr}`minres<petsc4py.PETSc.KSP.Type.MINRES>` as the
+# {py:class}`Krylov-solver method<petsc4py.PETSc.KSP.Type>` and
+# a direct method ({py:attr}`mumps<petsc4py.PETSc.Mat.SolverType.MUMPS>`)
+# to solve the arising preconditioned system.
 
 petsc_options = {
     "ksp_type": "minres",
@@ -187,7 +243,7 @@ tau = dolfinx.fem.Function(S)
 problem = dolfinx.fem.petsc.LinearProblem(
     extract_blocks(a),
     extract_blocks(L),
-    u=[u, tau],
+    u=[tau, u],
     bcs=[],
     P=extract_blocks(P),
     petsc_options=petsc_options,
@@ -195,14 +251,23 @@ problem = dolfinx.fem.petsc.LinearProblem(
 )
 problem.solve()
 
+# We output the solution to file, if ADIOS2 is available.
 
 if dolfinx.has_adios2:
     with dolfinx.io.VTXWriter(omega.comm, "u.bp", [u], engine="BP5") as bp:
         bp.write(0.0)
 
+# As before, we compute the $L^2$-error of the solution in the interior and exterior domain.
 
 error_ui = inner(u - ui_exact, u - ui_exact) * dxI
 error_ue = inner(u - ue_exact, u - ue_exact) * dxE
 L2_ui = np.sqrt(scifem.assemble_scalar(error_ui))
 L2_ue = np.sqrt(scifem.assemble_scalar(error_ue))
-PETSc.Sys.Print(f"L2(ui): {L2_ui:.2e}\n L2(ue): {L2_ue:.2e}")
+PETSc.Sys.Print(f"L2(ui): {L2_ui:.5e}\nL2(ue): {L2_ue:.5e}")
+
+
+# ```{bibliography}
+# :filter: cited
+# :labelprefix:
+# :keyprefix: emims-
+# ```
