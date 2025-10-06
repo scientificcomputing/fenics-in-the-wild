@@ -20,8 +20,8 @@ dev = [
     "jupytext",
     "ruff",
     "mypy",
-    "pyvista[jupyter]",
-    "vtk",
+    "pyvista[jupyter]>=0.56",
+    "vtk>=9.5.0",
     "sphinx_codeautolink",
 ]
 
