@@ -105,6 +105,7 @@ ft = dolfinx.mesh.meshtags(omega, tdim - 1, marker_filter, marker[marker_filter]
 ft.name = "interface_marker"
 # -
 
+# (one-sided-integrals)=
 # ## One-sided integrals over an interior interface
 # As we require integration over the interior boundary, from the view-point of the interior domain,
 # we will define an integration measure that is "one-sided", commonly known as an "exterior facet" measure.
