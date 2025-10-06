@@ -18,7 +18,7 @@ parts:
       - file: src/ucs/diffusion/flow
       - file: src/ucs/diffusion/flow_variational_form
 
-  - caption: "Modelling of excitable cells"
+  - caption: "Use case 3"
     chapters:
       - file: src/ucs/emi/emi
       - file: src/ucs/emi/emi_primal_single

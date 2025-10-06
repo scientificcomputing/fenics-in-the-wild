@@ -1,7 +1,7 @@
 
-# The Extra, Intral Membrane (EMI) model
+# Modelling of excitable cells - the EMI model
 
-The EMI model is a way of modelling the intracellular, extracellular and membrane between the two explicitly.
+The Extra, Intral Membrane (EMI) model is a way of modelling the intracellular, extracellular and membrane between the two explicitly.
 A full introduction to the topic is given in {cite}`emi2021framework`. 
 
 In this section, we limit ourselves two the following set of equations, with a single intra-cellular and extracellular space.
