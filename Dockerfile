@@ -18,7 +18,7 @@ WORKDIR ${HOME}/data
 # Download stl files
 RUN apt-get update && apt-get install -y wget unzip mesa-utils libgl1-mesa-dev 
 RUN wget -nc https://zenodo.org/records/14536218/files/mri2femii-chp2-dataset.tar.gz
-ENV WILDFENICS_EXTRACT_PATH="/root/data/"
+ENV WILDFENICS_EXTRACT_PATH=${HOME}/data/
 RUN tar xvzf mri2femii-chp2-dataset.tar.gz -C ${WILDFENICS_EXTRACT_PATH}
 ENV WILDFENICS_DATA_PATH=${WILDFENICS_EXTRACT_PATH}/mri2femii-chp2-dataset/Gonzo/output
 
