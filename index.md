@@ -10,3 +10,6 @@ To achieve its overarching ambition, the project aims:
 - To create a plugin for the popular biomedical software 3D Slicer to support the automatic creation of digital twins of biomedical systems
 - To extend wildmeshing to multi-material meshing and insertion of co-dimensional objects (tendons, cartilages) essential for many target applications
 - To improve support for biomedical simulations in FEniCSx including multi-scale features such as vasculature-tissue or membrane-cell interaction models
+  - The core library used for this work-package can be found at [FEniCSx_ii](https://scientificcomputing.github.io/fenicsx_ii)
+
+
