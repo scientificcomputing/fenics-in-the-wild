@@ -52,7 +52,7 @@ jobs:
           docker run -v $(pwd):/root/shared -w /root/shared ${{ steps.metadata.outputs.tags }}
 
       - name: Upload documentation as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: documentation
