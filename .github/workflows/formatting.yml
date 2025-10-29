@@ -13,8 +13,8 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
-    container: ghcr.io/fenics/dolfinx/dolfinx:nightly
+    runs-on: ubuntu-latest
+    container: ghcr.io/fenics/dolfinx/dolfinx:stable
     steps:
       - uses: actions/checkout@v5
 
