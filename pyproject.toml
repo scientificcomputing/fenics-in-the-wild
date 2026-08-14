@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "FEniCSInTheWild"
-version = "0.2.0.dev0"
+version = "0.3.0"
 dependencies = [
-    "jupyter-book",
+    "jupyter-book<2.0",
     "pydata-sphinx-theme",
-    "wildmeshing",
+    "pytetwild[all]",
     "scifem>=0.12.0",
     "adios4dolfinx",
+    "sphinx-codeautolink",
+    "jupytext"
 ]
 
 [project.optional-dependencies]

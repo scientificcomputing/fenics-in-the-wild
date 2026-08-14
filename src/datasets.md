@@ -27,7 +27,7 @@ wget -nc https://zenodo.org/records/14536218/files/mri2femii-chp2-dataset.tar.gz
 tar xvzf mri2femii-chp2-dataset.tar.gz
 ```
 
-An example of a config file for `wildmeshing` is:
+An example of a config file for `pytetwild` is:
 
 ```json
 {
@@ -70,7 +70,7 @@ wget -nc https://zenodo.org/records/10808334/files/mhornkjol/mri2fem-ii-chapter-
 unzip mri2fem-ii-chapter-3-code-v1.0.0.zip
 ```
 
-An example of a config file for `wildmeshing` is:
+An example of a config file for `pytetwild` is:
 
 ```json
 {
@@ -114,7 +114,7 @@ wget -nc https://zenodo.org/records/14749163/files/surfaces.zip
 unzip surfaces.zip
 ```
 
-An example configuration for wildmeshing would be
+An example configuration for pytetwild would be
 
 ```json
 {
