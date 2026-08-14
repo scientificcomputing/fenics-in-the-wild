@@ -29,27 +29,28 @@
 # +
 from mpi4py import MPI
 from petsc4py import PETSc
-import dolfinx
-from ufl import (
-    inner,
-    grad,
-    TestFunctions,
-    TrialFunctions,
-    FacetNormal,
-    MixedFunctionSpace,
-    sin,
-    pi,
-    extract_blocks,
-    Measure,
-    SpatialCoordinate,
-    cos,
-    div,
-    inv,
-    dot,
-)
+
 import numpy as np
 import scifem
 
+import dolfinx
+from ufl import (
+    FacetNormal,
+    Measure,
+    MixedFunctionSpace,
+    SpatialCoordinate,
+    TestFunctions,
+    TrialFunctions,
+    cos,
+    div,
+    dot,
+    extract_blocks,
+    grad,
+    inner,
+    inv,
+    pi,
+    sin,
+)
 
 x_L = 0.25
 x_U = 0.75

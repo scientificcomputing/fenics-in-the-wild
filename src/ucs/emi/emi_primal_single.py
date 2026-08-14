@@ -21,24 +21,26 @@
 
 from mpi4py import MPI
 from petsc4py import PETSc
-import dolfinx
-from ufl import (
-    inner,
-    grad,
-    TestFunctions,
-    TrialFunctions,
-    FacetNormal,
-    MixedFunctionSpace,
-    sin,
-    pi,
-    extract_blocks,
-    Measure,
-    SpatialCoordinate,
-    cos,
-    div,
-)
+
 import numpy as np
 import scifem
+
+import dolfinx
+from ufl import (
+    FacetNormal,
+    Measure,
+    MixedFunctionSpace,
+    SpatialCoordinate,
+    TestFunctions,
+    TrialFunctions,
+    cos,
+    div,
+    extract_blocks,
+    grad,
+    inner,
+    pi,
+    sin,
+)
 
 # Next, we define the intracellular and extracellular domain.
 # In the following examples, we will use $\Omega_e = [x_L, x_U]\times[y_L, y_U]$

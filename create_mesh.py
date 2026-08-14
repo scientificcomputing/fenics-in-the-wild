@@ -1,15 +1,17 @@
 import argparse
-from mpi4py import MPI
-import wildmeshing
-import dolfinx
-from pathlib import Path
 import json
-import numpy as np
-import ufl
-import basix.ufl
 import os
 import typing
+from pathlib import Path
 
+from mpi4py import MPI
+
+import numpy as np
+
+import basix.ufl
+import dolfinx
+import ufl
+import wildmeshing
 
 default_data_path = os.environ.get("WILDFENICS_DATA_PATH", "")
 

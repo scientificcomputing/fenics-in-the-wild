@@ -1,13 +1,16 @@
-from mpi4py import MPI
-import dolfinx
-import scifem
-import numpy as np
-import ufl
 import typing
-import basix.ufl
-import numpy.typing as npt
-import dolfinx.fem.petsc
 from time import perf_counter
+
+from mpi4py import MPI
+
+import numpy as np
+import numpy.typing as npt
+import scifem
+
+import basix.ufl
+import dolfinx
+import dolfinx.fem.petsc
+import ufl
 
 subdomains = typing.Literal["SAS", "LV", "V34"]
 interfaces = typing.Literal["LV_PAR", "V34_PAR", "AM_U", "AM_L", "EXTERNAL"]
