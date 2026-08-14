@@ -221,9 +221,9 @@ L += f_i * vi * dxI
 
 # We impose a Dirichlet boundary condition on the outer boundary of $\Omega_e$.
 # To do this, we transfer the facet tags (`ft`) from the parent mesh to the submesh (`omega_e`)
-# by calling {py:func}`scifem.transfer_meshtags_to_submesh`.
+# by calling {py:func}`dolfinx.mesh.transfer_meshtags_to_submesh`.
 
-sub_tag, _ = scifem.transfer_meshtags_to_submesh(
+sub_tag = dolfinx.mesh.transfer_meshtags_to_submesh(
     ft, omega_e, e_vertex_to_parent, exterior_to_parent
 )
 

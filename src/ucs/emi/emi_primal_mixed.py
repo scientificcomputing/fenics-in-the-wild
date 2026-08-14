@@ -151,7 +151,7 @@ tr_vi = vi(i_res)
 tr_ve = ve(e_res)
 
 # (mixed-assembly)=
-# ### Assembly of mixed dimensional forms
+# ## Assembly of mixed dimensional forms
 # As we in the variational forms have terms that couple functions defined on the pairs $\Omega_i$ and $\Gamma$,
 # $\Omega_e$ and $\Gamma$, we need to ensure that the assembly is done correctly.
 # We will perform the integration over $\Gamma$ as an interior facet integral on the full mesh $\Omega$,
@@ -199,7 +199,7 @@ L += f_i * vi * dxI
 # We also transfer the mesh tags to the exterior mesh to apply the Dirichlet boundary conditions
 
 # +
-sub_tag, _ = scifem.transfer_meshtags_to_submesh(
+sub_tag = dolfinx.mesh.transfer_meshtags_to_submesh(
     ft, omega_e, e_vertex_to_parent, exterior_to_parent
 )
 omega_e.topology.create_connectivity(omega_e.topology.dim - 1, omega_e.topology.dim)
